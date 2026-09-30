@@ -205,7 +205,7 @@ Raw notes:
 
     async with httpx.AsyncClient(timeout=45) as client:
         for index, candidate_model in enumerate(models):
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/\${candidate_model}:generateContent"
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{candidate_model}:generateContent"
             payload = {
                 "system_instruction": {
                     "parts": [
@@ -241,12 +241,12 @@ Raw notes:
                 data = r.json()
                 content = data["candidates"][0]["content"]["parts"][0]["text"].strip()
                 if content.startswith(chr(96) * 3):
-                    content = re.sub(
-                        r"^\\x60\\x60\\x60(?:json)?\\s*|\\s*\\x60\\x60\\x60$",
-                        "",
-                        content,
-                        flags=re.IGNORECASE,
-                    ).strip()
+                    lines = content.splitlines()
+                    if lines and lines[0].startswith(chr(96) * 3):
+                        lines = lines[1:]
+                    if lines and lines[-1].strip() == chr(96) * 3:
+                        lines = lines[:-1]
+                    content = "\n".join(lines).strip()
                 parsed = json.loads(content)
                 used_model = candidate_model
                 break

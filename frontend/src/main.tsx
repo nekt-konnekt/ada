@@ -149,6 +149,27 @@ const useAda = create<Store>((set) => ({
   setFocused: (focusedSection) => set({ focusedSection })
 }))
 
+function goTo(path: string) { window.history.pushState({}, '', path); window.dispatchEvent(new PopStateEvent('popstate')) }
+
+function PublicPage({ waitlist = false }: { waitlist?: boolean }) {
+  const [name, setName] = useState('')
+  const [email, setEmail] = useState('')
+  const [phone, setPhone] = useState('')
+  const [profession, setProfession] = useState<Profession>('doctor')
+  const [state, setState] = useState('Join waitlist')
+  async function submit() {
+    if (!name.trim()) return setState('Enter name')
+    if (!email.trim()) return setState('Enter email')
+    if (!phone.trim()) return setState('Enter phone')
+    setState('Joining…')
+    try { await joinWaitlist(name, email, phone, profession); setState('You’re on the list'); setName(''); setEmail(''); setPhone('') }
+    catch { setState('Could not join') }
+    window.setTimeout(() => setState('Join waitlist'), 2200)
+  }
+  if (waitlist) return <main className="public-page"><header className="public-top"><button className="public-brand" onClick={()=>goTo('/')}><strong>ada</strong><span>write naturally. structure professionally.</span></button></header><section className="public-content"><span className="eyebrow">EARLY ACCESS</span><h1>Join the early-access list</h1><p>Ada is being built for doctors and lawyers who want to turn rough notes into structured professional documents without stopping to format everything themselves.</p><div className="public-form"><label>Full name<input className="waitlist-input" value={name} onChange={e=>setName(e.target.value)} placeholder="Your name" autoComplete="name" /></label><label>Email<input className="waitlist-input" type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@example.com" autoComplete="email" /></label><label>Phone number<input className="waitlist-input" type="tel" value={phone} onChange={e=>setPhone(e.target.value)} placeholder="+234 801 234 5678" autoComplete="tel" /></label><div className="public-role"><span>Profession</span><div><button className={profession==='doctor'?'selected':''} onClick={()=>setProfession('doctor')}>Doctor</button><button className={profession==='lawyer'?'selected':''} onClick={()=>setProfession('lawyer')}>Lawyer</button></div></div><button className="waitlist-submit" onClick={submit}>{state}</button></div><div className="public-next"><strong>What happens next</strong><p>We'll contact you when Ada is ready for your professional workspace.</p></div><small className="privacy-note">No spam. Early access updates only.</small></section></main>
+  return <main className="public-page"><header className="public-top"><div className="public-brand"><strong>ada</strong><span>write naturally. structure professionally.</span></div></header><section className="public-content"><span className="eyebrow">ADA EARLY ACCESS</span><h1>Professional notes, structured as you work.</h1><p>Ada is being built for doctors and lawyers who want to turn rough notes into structured professional documents without stopping to format everything themselves.</p><div className="public-actions"><article><span className="eyebrow">ADA 0.1</span><h2>Try Ada 0.1</h2><p>The first working version of Ada is available to try now.</p><button onClick={()=>goTo('/0.1')}>Try Ada 0.1</button></article><article><span className="eyebrow">EARLY ACCESS</span><h2>Join the early-access list</h2><p>Get notified as Ada opens up to more professionals.</p><button onClick={()=>goTo('/waitlist')}>Join waitlist</button></article></div></section></main>
+}
+
 function App() {
   const { profession, notes, document, focusedSection } = useAda()
   const setNotes = useAda(s=>s.setNotes), setProfession=useAda(s=>s.setProfession), setDocument=useAda(s=>s.setDocument)
@@ -296,7 +317,7 @@ function App() {
     <header className="topbar">
       <div className="brand"><div><strong>ada</strong><span>write naturally. structure professionally.</span></div></div>
       <div className="mode"><span className="locked-mode">{profession==='doctor' ? 'Doctor' : 'Lawyer'} · locked</span></div>
-      <button className="waitlist-button" onClick={()=>setWaitlistOpen(true)}>Join waitlist</button>
+      <button className="waitlist-button" onClick={()=>goTo("/waitlist")}>Waitlist</button>
       <div className="status"><i></i>{status}</div>
     </header>
     <section className="workspace" style={{gridTemplateColumns:`${split}% 8px ${100-split}%`}}>
@@ -321,18 +342,6 @@ function App() {
       </section>
     </section>
     <footer><span>Ada 0.1 · human review remains in control</span><span>Documents stay on this device · raw notes stay with Ada</span></footer>
-    {waitlistOpen && <div className="waitlist-backdrop" onClick={()=>setWaitlistOpen(false)}>
-      <section className="waitlist-card" onClick={e=>e.stopPropagation()}>
-        <button className="close-button" onClick={()=>setWaitlistOpen(false)}>×</button>
-        <span className="eyebrow">EARLY ACCESS</span><h2>Ada is opening soon.</h2>
-        <p>Join the waitlist for early access to the professional note-to-document workspace.</p>
-        <div className="waitlist-profession"><strong>{profession==='doctor' ? 'Doctor' : 'Lawyer'}</strong><span>Your workspace is locked to this role.</span></div>
-        <input className="waitlist-input" type="text" value={waitlistName} onChange={e=>setWaitlistName(e.target.value)} placeholder="Your name" autoComplete="name" />
-        <input className="waitlist-input" type="email" value={waitlistEmail} onChange={e=>setWaitlistEmail(e.target.value)} placeholder="you@example.com" />
-        <input className="waitlist-input" type="tel" value={waitlistPhone} onChange={e=>setWaitlistPhone(e.target.value)} placeholder="+234 801 234 5678" autoComplete="tel" />
-        <button className="waitlist-submit" onClick={handleWaitlist}>{waitlistState}</button>
-      </section>
-    </div>}
     {professionLocked === null && <div className="lock-backdrop">
       <section className="lock-card"><span className="eyebrow">ADA PROFESSIONAL WORKSPACE</span><h2>Choose your profession.</h2><p>Ada locks each workspace to one professional role. You cannot switch between Doctor and Lawyer inside the workspace.</p><div className="lock-options"><button onClick={()=>chooseProfession('doctor')}><strong>Doctor</strong><span>Clinical documentation</span></button><button onClick={()=>chooseProfession('lawyer')}><strong>Lawyer</strong><span>Legal case documentation</span></button></div></section>
     </div>}
@@ -350,4 +359,6 @@ function App() {
   </main>
 }
 
-createRoot(document.getElementById('root')!).render(<React.StrictMode><App/></React.StrictMode>)
+function Root() { const [path, setPath] = useState(window.location.pathname); useEffect(() => { const onPop = () => setPath(window.location.pathname); window.addEventListener('popstate', onPop); return () => window.removeEventListener('popstate', onPop) }, []); if (path === '/0.1') return <App />; if (path === '/waitlist') return <PublicPage waitlist />; return <PublicPage /> }
+
+createRoot(document.getElementById('root')!).render(<React.StrictMode><Root/></React.StrictMode>)

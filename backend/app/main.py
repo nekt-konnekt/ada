@@ -179,7 +179,13 @@ def local_structure(profession: Profession, notes: str) -> StructureResponse:
         assessment = next((s for s in ss if re.search(r"\?\s*angina|\bassessment\b", s, re.I)), "")
         plan = join_matching([r"\bplan:", r"\baspirin\b", r"\btroponin\b", r"\brepeat ECG\b", r"\brefer\b", r"\badvise\b"])
         follow_up = join_matching([r"\breview\b", r"\bfollow[- ]?up\b"])
-        history = " ".join(s for s in ss if s not in {chief, history_social_family, allergies, observations, examination, investigations, assessment, plan, follow_up} and s.strip())
+        history_excluded = [
+            r"\bsmoker\b", r"\bfather\b", r"\ballerg", r"\bBP\b", r"\bHR\b", r"\btemp\b",
+            r"\blungs\b", r"\bheart sounds\b", r"\bmurmur\b", r"\bECG\b", r"\?\s*angina",
+            r"\bplan:", r"\baspirin\b", r"\btroponin\b", r"\brepeat ECG\b", r"\brefer\b", r"\badvise\b",
+            r"\breview\b", r"\bfollow[- ]?up\b"
+        ]
+        history = " ".join(s for s in ss if s != chief and not any(re.search(pattern, s, re.I) for pattern in history_excluded))
         sections = [
             {"id": "chief_complaint", "label": "Chief Complaint", "content": chief},
             {"id": "history", "label": "History of Present Illness", "content": history},

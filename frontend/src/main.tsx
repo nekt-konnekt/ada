@@ -1,0 +1,103 @@
+import React, { useEffect, useRef, useState } from 'react'
+import { createRoot } from 'react-dom/client'
+import { create } from 'zustand'
+import './styles.css'
+
+type Profession = 'doctor' | 'lawyer'
+type Section = { id: string; label: string; content: string }
+type DocumentState = { title: string; sections: Section[]; needs_input: string[]; provider: string }
+
+type Store = {
+  profession: Profession
+  notes: string
+  document: DocumentState
+  focusedSection: string | null
+  setProfession: (p: Profession) => void
+  setNotes: (n: string) => void
+  setDocument: (d: DocumentState) => void
+  editSection: (id: string, content: string) => void
+  setFocused: (id: string | null) => void
+}
+
+const emptyDoc = (profession: Profession): DocumentState => profession === 'doctor'
+  ? { title: 'Clinical Note', sections: [
+      { id:'chief_complaint', label:'Chief Complaint', content:'' }, { id:'history', label:'History of Present Illness', content:'' },
+      { id:'observations', label:'Observations / Vitals', content:'' }, { id:'assessment', label:'Assessment', content:'' }, { id:'plan', label:'Plan', content:'' }
+    ], needs_input: [], provider:'ready' }
+  : { title: 'Case Note', sections: [
+      { id:'parties', label:'Parties', content:'' }, { id:'facts', label:'Facts / Incident Summary', content:'' },
+      { id:'injuries', label:'Injuries / Damages', content:'' }, { id:'liability', label:'Liability / Issues', content:'' },
+      { id:'evidence', label:'Supporting Information', content:'' }, { id:'next_steps', label:'Next Steps', content:'' }
+    ], needs_input: [], provider:'ready' }
+
+const useAda = create<Store>((set) => ({
+  profession: 'doctor', notes: '', document: emptyDoc('doctor'), focusedSection: null,
+  setProfession: (profession) => set({ profession, document: emptyDoc(profession) }),
+  setNotes: (notes) => set({ notes }), setDocument: (document) => set({ document }),
+  editSection: (id, content) => set(s => ({ document: { ...s.document, sections: s.document.sections.map(x => x.id === id ? {...x, content} : x) }})),
+  setFocused: (focusedSection) => set({ focusedSection })
+}))
+
+function App() {
+  const { profession, notes, document, focusedSection } = useAda()
+  const setNotes = useAda(s=>s.setNotes), setProfession=useAda(s=>s.setProfession), setDocument=useAda(s=>s.setDocument)
+  const setFocused=useAda(s=>s.setFocused), editSection=useAda(s=>s.editSection)
+  const [status, setStatus] = useState('Ready')
+  const [split, setSplit] = useState(50)
+  const timer = useRef<number | undefined>(undefined)
+  const request = useRef<AbortController | null>(null)
+  const first = useRef(true)
+
+  useEffect(() => {
+    if (first.current) { first.current=false; return }
+    window.clearTimeout(timer.current)
+    if (!notes.trim()) { setDocument(emptyDoc(profession)); setStatus('Ready'); return }
+    timer.current = window.setTimeout(async () => {
+      request.current?.abort(); request.current = new AbortController(); setStatus('Updating…')
+      try {
+        const r = await fetch('http://localhost:8000/api/structure', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({profession, notes, current_document:document}), signal:request.current.signal })
+        if (!r.ok) throw new Error('Request failed')
+        const next = await r.json() as DocumentState & { profession: Profession }
+        setDocument(next); setStatus(next.provider === 'local-demo' ? 'Local demo engine' : `Live: ${next.provider}`)
+      } catch (e) { if ((e as Error).name !== 'AbortError') setStatus('Could not update') }
+    }, 650)
+    return () => window.clearTimeout(timer.current)
+  }, [notes, profession])
+
+  function handlePointer(e: React.PointerEvent<HTMLDivElement>) {
+    const parent = e.currentTarget.parentElement?.getBoundingClientRect(); if (!parent) return
+    const pct = Math.max(30, Math.min(70, ((e.clientX-parent.left)/parent.width)*100)); setSplit(pct)
+  }
+
+  return <main className="app">
+    <header className="topbar">
+      <div className="brand"><div className="logo">a</div><div><strong>ada</strong><span>write naturally. structure professionally.</span></div></div>
+      <div className="mode"><button className={profession==='doctor'?'active':''} onClick={()=>setProfession('doctor')}>Doctor</button><button className={profession==='lawyer'?'active':''} onClick={()=>setProfession('lawyer')}>Lawyer</button></div>
+      <div className="status"><i></i>{status}</div>
+    </header>
+    <section className="workspace" style={{gridTemplateColumns:`${split}% 8px ${100-split}%`}}>
+      <section className="pane notes-pane">
+        <div className="pane-head"><div><span className="eyebrow">01 · YOUR NOTES</span><h2>Write however you think.</h2></div><span className="hint">{notes.length.toLocaleString()} chars</span></div>
+        <textarea autoFocus value={notes} onChange={e=>setNotes(e.target.value)} placeholder={profession==='doctor' ? 'Start scribbling…\n\npatient came in complaining of chest pain since yesterday…' : 'Start scribbling…\n\nclient was driving home when the other vehicle…'} />
+        <div className="note-foot"><span>Anything goes. Ada will organize what is actually present.</span><button onClick={()=>setNotes('')}>Clear</button></div>
+      </section>
+      <div className="divider" onPointerDown={(e)=>{e.currentTarget.setPointerCapture(e.pointerId); const move=(ev:PointerEvent)=>handlePointer(ev as unknown as React.PointerEvent<HTMLDivElement>); const up=()=>{e.currentTarget.removeEventListener('pointermove',move as any);e.currentTarget.removeEventListener('pointerup',up)};e.currentTarget.addEventListener('pointermove',move as any);e.currentTarget.addEventListener('pointerup',up)}}><span></span></div>
+      <section className="pane document-pane">
+        <div className="pane-head"><div><span className="eyebrow">02 · STRUCTURED DOCUMENT</span><h2>{document.title}</h2></div><span className="live-dot">● LIVE</span></div>
+        {document.needs_input.length > 0 && <div className="needs"><strong>Needs input</strong><span>{document.needs_input.join(' · ')}</span></div>}
+        <article className="document">
+          <div className="doc-title">{document.title}</div>
+          <div className="doc-rule"></div>
+          {document.sections.map(section => <section className="doc-section" key={section.id}>
+            <label>{section.label}</label>
+            <textarea value={section.content} onFocus={()=>setFocused(section.id)} onBlur={()=>setFocused(null)} onChange={e=>editSection(section.id,e.target.value)} placeholder="Ada will place information here as it appears…" />
+            {focusedSection===section.id && <small>Editing · your changes are protected while focused</small>}
+          </section>)}
+        </article>
+      </section>
+    </section>
+    <footer><span>Ada 0.1 · human review remains in control</span><span>{profession === 'doctor' ? 'Clinical workspace' : 'Legal workspace'}</span></footer>
+  </main>
+}
+
+createRoot(document.getElementById('root')!).render(<React.StrictMode><App/></React.StrictMode>)

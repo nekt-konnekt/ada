@@ -69,6 +69,16 @@ async function listLocalNotes(): Promise<SavedNote[]> {
   });
 }
 
+
+async function deleteLocalNote(id: string): Promise<void> {
+  const db = await openNotesDb();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    tx.objectStore(STORE_NAME).delete(id);
+    tx.oncomplete = () => { db.close(); resolve(); };
+    tx.onerror = () => { db.close(); reject(tx.error); };
+  });
+}
 async function joinWaitlist(name: string, email: string, phone: string, profession: Profession): Promise<void> {
   const response = await fetch(ADA_SUPABASE_URL + '/rest/v1/waitlist', {
     method: 'POST', headers: { apikey: ADA_SUPABASE_KEY, Authorization: 'Bearer ' + ADA_SUPABASE_KEY, 'Content-Type': 'application/json', Prefer: 'return=minimal' },

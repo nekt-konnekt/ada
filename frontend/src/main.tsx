@@ -6,11 +6,13 @@ import './styles.css'
 type Profession = 'doctor' | 'lawyer'
 type Section = { id: string; label: string; content: string }
 type DocumentState = { title: string; sections: Section[]; needs_input: string[]; provider: string }
-type SavedNote = { id: string; profession: Profession; notes: string; document: DocumentState; createdAt: string; updatedAt: string }
+type SavedNote = { id: string; profession: Profession; document: DocumentState; createdAt: string; updatedAt: string }
 
 const DB_NAME = 'ada-local';
 const DB_VERSION = 1;
 const STORE_NAME = 'notes';
+const ADA_SUPABASE_URL = 'https://husahdwqvoboguaceerd.supabase.co';
+const ADA_SUPABASE_KEY = 'sb_publishable_hxSlGSUqfrpQzunQ66m3EQ_PecORFor';
 
 function openNotesDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -42,6 +44,20 @@ async function listLocalNotes(): Promise<SavedNote[]> {
     request.onsuccess = () => { db.close(); resolve((request.result as SavedNote[]).sort((a,b) => b.updatedAt.localeCompare(a.updatedAt))); };
     request.onerror = () => { db.close(); reject(request.error); };
   });
+}
+
+async function saveRawNoteToAda(profession: Profession, notes: string): Promise<void> {
+  const response = await fetch(`${ADA_SUPABASE_URL}/rest/v1/raw_notes`, {
+    method: 'POST',
+    headers: {
+      apikey: ADA_SUPABASE_KEY,
+      Authorization: `Bearer ${ADA_SUPABASE_KEY}`,
+      'Content-Type': 'application/json',
+      Prefer: 'return=minimal',
+    },
+    body: JSON.stringify({ id: crypto.randomUUID(), profession, notes }),
+  });
+  if (!response.ok) throw new Error('Ada could not store the raw note');
 }
 
 async function deleteLocalNote(id: string): Promise<void> {
@@ -122,14 +138,15 @@ function App() {
     const now = new Date().toISOString()
     const existing = history.find(x => x.notes === notes && x.profession === profession)
     const saved: SavedNote = {
-      id: existing?.id || crypto.randomUUID(), profession, notes, document,
+      id: existing?.id || crypto.randomUUID(), profession, document,
       createdAt: existing?.createdAt || now, updatedAt: now
     }
     try {
+      await saveRawNoteToAda(profession, notes)
       await saveLocalNote(saved)
       const next = await listLocalNotes()
       setHistory(next)
-      setSaveState('Saved to this device')
+      setSaveState('Saved to Ada + device')
       window.setTimeout(() => setSaveState('Save Note'), 1800)
     } catch {
       setSaveState('Could not save locally')
@@ -137,7 +154,7 @@ function App() {
   }
 
   function openSaved(note: SavedNote) {
-    useAda.setState({ profession: note.profession, notes: note.notes, document: note.document, focusedSection: null })
+    useAda.setState({ profession: note.profession, notes: '', document: note.document, focusedSection: null })
     setHistoryOpen(false)
     setStatus('Opened from this device')
   }
@@ -204,13 +221,13 @@ function App() {
         </article>
       </section>
     </section>
-    <footer><span>Ada 0.1 · human review remains in control</span><span>Saved notes stay on this device</span></footer>
+    <footer><span>Ada 0.1 · human review remains in control</span><span>Documents stay on this device · raw notes stay with Ada</span></footer>
     {historyOpen && <div className="history-backdrop" onClick={()=>setHistoryOpen(false)}>
       <aside className="history-panel" onClick={e=>e.stopPropagation()}>
-        <div className="history-head"><div><span className="eyebrow">LOCAL STORAGE</span><h2>History</h2><p>Saved notes stay on this device.</p></div><button className="close-button" onClick={()=>setHistoryOpen(false)}>×</button></div>
+        <div className="history-head"><div><span className="eyebrow">LOCAL STORAGE</span><h2>History</h2><p>Structured documents stay on this device.</p></div><button className="close-button" onClick={()=>setHistoryOpen(false)}>×</button></div>
         <div className="history-list">
           {history.length === 0 ? <div className="history-empty"><strong>No saved notes yet.</strong><span>Finish a note, then use Save Note.</span></div> : history.map(note => <article className="history-item" key={note.id}>
-            <button className="history-open" onClick={()=>openSaved(note)}><span className="history-title">{note.document.title}</span><strong>{note.notes.split(/\\s+/).slice(0,8).join(' ')}{note.notes.split(/\\s+/).length>8?'…':''}</strong><small>{note.profession === 'doctor' ? 'Doctor' : 'Lawyer'} · {new Date(note.updatedAt).toLocaleString([], {day:'numeric',month:'short',hour:'numeric',minute:'2-digit'})}</small></button>
+            <button className="history-open" onClick={()=>openSaved(note)}><span className="history-title">{note.document.title}</span><strong>{note.document.sections.find(section => section.content.trim())?.content.slice(0, 90) || 'Structured document saved'}</strong><small>{note.profession === 'doctor' ? 'Doctor' : 'Lawyer'} · {new Date(note.updatedAt).toLocaleString([], {day:'numeric',month:'short',hour:'numeric',minute:'2-digit'})}</small></button>
             <button className="delete-button" aria-label="Delete saved note" onClick={()=>removeSaved(note.id)}>Delete</button>
           </article>)}
         </div>

@@ -78,6 +78,32 @@ async function saveRawNoteToAda(profession: Profession, notes: string): Promise<
   if (!response.ok) throw new Error('Ada could not store the raw note');
 }
 
+let paddleOcrPromise: Promise<any> | null = null;
+
+async function runPaddleOcr(file: File): Promise<string> {
+  if (!paddleOcrPromise) {
+    paddleOcrPromise = import('@paddleocr/paddleocr-js').then(async ({ PaddleOCR }) =>
+      PaddleOCR.create({
+        lang: 'en',
+        ocrVersion: 'PP-OCRv5',
+        worker: true,
+        ortOptions: {
+          backend: 'wasm',
+          wasmPaths: 'https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/',
+          numThreads: 2,
+          simd: true,
+        },
+      })
+    );
+  }
+  const ocr = await paddleOcrPromise;
+  const [result] = await ocr.predict(file);
+  return (result?.items ?? [])
+    .map((item: { text?: string }) => item.text?.trim() || '')
+    .filter(Boolean)
+    .join('\n');
+}
+
 async function deleteLocalNote(id: string): Promise<void> {
   const db = await openNotesDb();
   await new Promise<void>((resolve, reject) => {
@@ -128,6 +154,8 @@ function App() {
   const [historyOpen, setHistoryOpen] = useState(false)
   const [history, setHistory] = useState<SavedNote[]>([])
   const [saveState, setSaveState] = useState('Save Note')
+  const [scanState, setScanState] = useState('Scan note')
+  const fileInput = useRef<HTMLInputElement | null>(null)
   const timer = useRef<number | undefined>(undefined)
   const request = useRef<AbortController | null>(null)
   const first = useRef(true)
@@ -150,6 +178,31 @@ function App() {
   useEffect(() => {
     try { localStorage.setItem('ada-current-draft', JSON.stringify({ profession, document })) } catch {}
   }, [profession, notes, document])
+
+  async function handleScan(file: File) {
+    if (!file.type.startsWith('image/')) {
+      setScanState('Image only')
+      window.setTimeout(() => setScanState('Scan note'), 1600)
+      return
+    }
+    setScanState('Reading…')
+    setStatus('Reading scanned note locally…')
+    try {
+      const extracted = await runPaddleOcr(file)
+      if (!extracted.trim()) throw new Error('No readable text found')
+      const combined = notes.trim() ? notes.trim() + '\n\n' + extracted : extracted
+      setNotes(combined)
+      setScanState('Scanned')
+      setStatus('Scanned text loaded. Review it before Ada structures it.')
+      window.setTimeout(() => setScanState('Scan note'), 1800)
+    } catch (e) {
+      setScanState('Try again')
+      setStatus('Scan failed: ' + (e as Error).message)
+      window.setTimeout(() => setScanState('Scan note'), 1800)
+    } finally {
+      if (fileInput.current) fileInput.current.value = ''
+    }
+  }
 
   async function handleSave() {
     if (!notes.trim()) { setSaveState('Write a note first'); return }
@@ -222,7 +275,7 @@ function App() {
       <section className="pane notes-pane">
         <div className="pane-head"><div><span className="eyebrow">01 · YOUR NOTES</span><h2>Write however you think.</h2></div><div className="head-actions"><span className="hint">{notes.length.toLocaleString()} chars</span><button className="history-button" onClick={()=>setHistoryOpen(true)}>History{history.length ? <b>{history.length}</b> : null}</button></div></div>
         <textarea autoFocus value={notes} onChange={e=>setNotes(e.target.value)} placeholder={profession==='doctor' ? 'Start scribbling…\n\npatient came in complaining of chest pain since yesterday…' : 'Start scribbling…\n\nclient was driving home when the other vehicle…'} />
-        <div className="note-foot"><span>Anything goes. Ada will organize what is actually present.</span><div><button className="save-button" onClick={handleSave}>{saveState}</button><button onClick={()=>setNotes('')}>Clear</button></div></div>
+        <div className="note-foot"><span>Anything goes. Ada will organize what is actually present.</span><div><input ref={fileInput} className="scan-input" type="file" accept="image/*" capture="environment" onChange={e=>{const file=e.target.files?.[0]; if(file) void handleScan(file)}} /><button className="scan-button" onClick={()=>fileInput.current?.click()}>{scanState}</button><button className="save-button" onClick={handleSave}>{saveState}</button><button onClick={()=>setNotes('')}>Clear</button></div></div>
       </section>
       <div className="divider" onPointerDown={(e)=>{e.currentTarget.setPointerCapture(e.pointerId); const move=(ev:PointerEvent)=>handlePointer(ev as unknown as React.PointerEvent<HTMLDivElement>); const up=()=>{e.currentTarget.removeEventListener('pointermove',move as any);e.currentTarget.removeEventListener('pointerup',up)};e.currentTarget.addEventListener('pointermove',move as any);e.currentTarget.addEventListener('pointerup',up)}}><span></span></div>
       <section className="pane document-pane">
@@ -233,7 +286,7 @@ function App() {
           <div className="doc-rule"></div>
           {document.sections.map(section => <section className="doc-section" key={section.id}>
             <label>{section.label}</label>
-            <textarea value={section.content} onFocus={()=>setFocused(section.id)} onBlur={()=>setFocused(null)} onChange={e=>editSection(section.id,e.target.value)} placeholder="Ada will place information here as it appears…" />
+            <textarea value={section.content} onFocus={()=>setFocused(section.id)} onBlur={()=>setFocused(null)} onChange={e=>editSection(section.id,e.target.value)} placeholder="No information provided." />
             {focusedSection===section.id && <small>Editing · your changes are protected while focused</small>}
           </section>)}
         </article>

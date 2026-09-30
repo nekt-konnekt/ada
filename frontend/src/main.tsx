@@ -66,10 +66,10 @@ async function listLocalNotes(): Promise<SavedNote[]> {
   });
 }
 
-async function joinWaitlist(email: string, phone: string, profession: Profession): Promise<void> {
+async function joinWaitlist(name: string, email: string, phone: string, profession: Profession): Promise<void> {
   const response = await fetch(ADA_SUPABASE_URL + '/rest/v1/waitlist', {
     method: 'POST', headers: { apikey: ADA_SUPABASE_KEY, Authorization: 'Bearer ' + ADA_SUPABASE_KEY, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
-    body: JSON.stringify({ email: email.trim().toLowerCase(), phone: phone.trim(), profession }),
+    body: JSON.stringify({ name: name.trim(), email: email.trim().toLowerCase(), phone: phone.trim(), profession }),
   });
   if (!response.ok && response.status !== 409) throw new Error('Could not join the waitlist');
 }
@@ -155,6 +155,7 @@ function App() {
   const setFocused=useAda(s=>s.setFocused), editSection=useAda(s=>s.editSection)
   const [status, setStatus] = useState('Ready')
   const [waitlistOpen, setWaitlistOpen] = useState(false)
+  const [waitlistName, setWaitlistName] = useState('')
   const [waitlistEmail, setWaitlistEmail] = useState('')
   const [waitlistPhone, setWaitlistPhone] = useState('')
   const [waitlistState, setWaitlistState] = useState('Join waitlist')
@@ -242,10 +243,11 @@ function App() {
   }
 
   async function handleWaitlist() {
+    if (!waitlistName.trim()) { setWaitlistState('Enter name'); return }
     if (!waitlistEmail.trim()) { setWaitlistState('Enter email'); return }
     if (!waitlistPhone.trim()) { setWaitlistState('Enter phone'); return }
     setWaitlistState('Joining…')
-    try { await joinWaitlist(waitlistEmail, waitlistPhone, profession); setWaitlistState('You’re on the list'); setWaitlistEmail(''); setWaitlistPhone('') }
+    try { await joinWaitlist(waitlistName, waitlistEmail, waitlistPhone, profession); setWaitlistState('You’re on the list'); setWaitlistName(''); setWaitlistEmail(''); setWaitlistPhone('') }
     catch { setWaitlistState('Could not join') }
     window.setTimeout(() => setWaitlistState('Join waitlist'), 2200)
   }
@@ -325,6 +327,7 @@ function App() {
         <span className="eyebrow">EARLY ACCESS</span><h2>Ada is opening soon.</h2>
         <p>Join the waitlist for early access to the professional note-to-document workspace.</p>
         <div className="waitlist-profession"><strong>{profession==='doctor' ? 'Doctor' : 'Lawyer'}</strong><span>Your workspace is locked to this role.</span></div>
+        <input className="waitlist-input" type="text" value={waitlistName} onChange={e=>setWaitlistName(e.target.value)} placeholder="Your name" autoComplete="name" />
         <input className="waitlist-input" type="email" value={waitlistEmail} onChange={e=>setWaitlistEmail(e.target.value)} placeholder="you@example.com" />
         <input className="waitlist-input" type="tel" value={waitlistPhone} onChange={e=>setWaitlistPhone(e.target.value)} placeholder="+234 801 234 5678" autoComplete="tel" />
         <button className="waitlist-submit" onClick={handleWaitlist}>{waitlistState}</button>

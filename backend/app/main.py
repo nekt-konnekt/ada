@@ -113,7 +113,7 @@ def local_structure(profession: Profession, notes: str) -> StructureResponse:
 async def llm_structure(req: StructureRequest) -> StructureResponse | None:
     base = os.getenv("LLM_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai").strip()
     key = os.getenv("GEMINI_API_KEY", "").strip() or os.getenv("LLM_API_KEY", "").strip()
-    model = os.getenv("LLM_MODEL", "gemini-2.5-flash").strip()
+    model = os.getenv("LLM_MODEL", "gemini-3.8-flash").strip()
 
     if not key:
         return None
@@ -197,7 +197,6 @@ Raw notes:
     url = base.rstrip("/") + "/chat/completions"
     payload = {
         "model": model,
-        "temperature": 0.1,
         "messages": [
             {"role": "system", "content": "You are a deterministic professional documentation engine. Return valid JSON only."},
             {"role": "user", "content": prompt},
@@ -256,9 +255,9 @@ Raw notes:
 async def health():
     configured = bool(
         (os.getenv("GEMINI_API_KEY") or os.getenv("LLM_API_KEY"))
-        and os.getenv("LLM_MODEL", "gemini-2.5-flash")
+        and os.getenv("LLM_MODEL", "gemini-3.8-flash")
     )
-    return {"ok": True, "version": "0.1.0", "llm_configured": configured, "model": os.getenv("LLM_MODEL", "gemini-2.5-flash")}
+    return {"ok": True, "version": "0.1.0", "llm_configured": configured, "model": os.getenv("LLM_MODEL", "gemini-3.8-flash")}
 
 
 @app.post("/api/structure", response_model=StructureResponse)

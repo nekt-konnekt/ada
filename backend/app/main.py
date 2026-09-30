@@ -113,7 +113,7 @@ def local_structure(profession: Profession, notes: str) -> StructureResponse:
 
 async def llm_structure(req: StructureRequest) -> StructureResponse | None:
     key = os.getenv("GEMINI_API_KEY", "").strip() or os.getenv("LLM_API_KEY", "").strip()
-    configured_model = os.getenv("LLM_MODEL", "gemini-flash-latest").strip()
+    configured_model = os.getenv("LLM_MODEL", "gemini-3.5-flash").strip()
 
     if not key:
         return None
@@ -195,7 +195,7 @@ Raw notes:
 """
 
     models = []
-    for candidate in [configured_model, "gemini-flash-latest", "gemini-3.7-flash"]:
+    for candidate in [configured_model, "gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-flash-latest"]:
         if candidate and candidate not in models:
             models.append(candidate)
 

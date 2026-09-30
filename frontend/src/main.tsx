@@ -5,6 +5,7 @@ import './styles.css'
 
 type Profession = 'doctor' | 'lawyer'
 type Section = { id: string; label: string; content: string }
+type WorkspaceMode = 'quick' | 'professional'
 type DocumentState = { title: string; sections: Section[]; needs_input: string[]; provider: string }
 type SavedNote = { id: string; profession: Profession; document: DocumentState; createdAt: string; updatedAt: string }
 
@@ -167,7 +168,7 @@ function PublicPage({ waitlist = false }: { waitlist?: boolean }) {
     window.setTimeout(() => setState('Join waitlist'), 2200)
   }
   if (waitlist) return <main className="public-page"><header className="public-top"><button className="public-brand" onClick={()=>goTo('/')}><strong>ada</strong><span>write naturally. structure professionally.</span></button></header><section className="public-content"><span className="eyebrow">EARLY ACCESS</span><h1>Join the early-access list</h1><p>Ada is being built for doctors and lawyers who want to turn rough notes into structured professional documents without stopping to format everything themselves.</p><div className="public-form"><label>Full name<input className="waitlist-input" value={name} onChange={e=>setName(e.target.value)} placeholder="Your name" autoComplete="name" /></label><label>Email<input className="waitlist-input" type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@example.com" autoComplete="email" /></label><label>Phone number<input className="waitlist-input" type="tel" value={phone} onChange={e=>setPhone(e.target.value)} placeholder="+234 801 234 5678" autoComplete="tel" /></label><div className="public-role"><span>Profession</span><div><button className={profession==='doctor'?'selected':''} onClick={()=>setProfession('doctor')}>Doctor</button><button className={profession==='lawyer'?'selected':''} onClick={()=>setProfession('lawyer')}>Lawyer</button></div></div><button className="waitlist-submit" onClick={submit}>{state}</button></div><div className="public-next"><strong>What happens next</strong><p>We'll contact you when Ada is ready for your professional workspace.</p></div><small className="privacy-note">No spam. Early access updates only.</small></section></main>
-  return <main className="public-page"><header className="public-top"><div className="public-brand"><strong>ada</strong><span>write naturally. structure professionally.</span></div></header><section className="public-content"><span className="eyebrow">ADA EARLY ACCESS</span><h1>Professional notes, structured as you work.</h1><p>Ada is being built for doctors and lawyers who want to turn rough notes into structured professional documents without stopping to format everything themselves.</p><div className="public-actions"><article><span className="eyebrow">ADA 0.1</span><h2>Try Ada 0.1</h2><p>The first working version of Ada is available to try now.</p><button onClick={()=>goTo('/0.1')}>Try Ada 0.1</button></article><article><span className="eyebrow">EARLY ACCESS</span><h2>Join the early-access list</h2><p>Get notified as Ada opens up to more professionals.</p><button onClick={()=>goTo('/waitlist')}>Join waitlist</button></article></div></section></main>
+  return <main className="public-page"><header className="public-top"><div className="public-brand"><strong>ada</strong><span>write naturally. structure professionally.</span></div></header><section className="public-content"><span className="eyebrow">ADA EARLY ACCESS</span><h1>Professional notes, structured as you work.</h1><p>Ada is being built for doctors and lawyers who want to turn rough notes into structured professional documents without stopping to format everything themselves.</p><section className="public-problems"><span className="eyebrow">THE PROBLEM</span><h2>Your notes don't arrive in professional structure.</h2><div className="public-problem-grid"><article><span className="eyebrow">FOR DOCTORS</span><h3>A patient talks. You observe. You remember.</h3><p>Symptoms, observations, medications and follow-up details come in as the consultation happens. The work of putting them into a proper clinical note comes afterwards.</p></article><article><span className="eyebrow">FOR LAWYERS</span><h3>A client tells you what happened. You collect the pieces.</h3><p>Names, dates, events, allegations, documents and things to verify rarely arrive in the order your case note needs. Structuring them is a separate job.</p></article></div><p className="public-problem-close">Ada lets you scribble naturally. When the work needs a professional document, Ada structures what is actually there and leaves you in control.</p></section><div className="public-actions"><article><span className="eyebrow">ADA 0.1</span><h2>Try Ada 0.1</h2><p>The first working version of Ada is available to try now.</p><button onClick={()=>goTo('/0.1')}>Try Ada 0.1</button></article><article><span className="eyebrow">EARLY ACCESS</span><h2>Join the early-access list</h2><p>Get notified as Ada opens up to more professionals.</p><button onClick={()=>goTo('/waitlist')}>Join waitlist</button></article></div></section></main>
 }
 
 function App() {
@@ -175,6 +176,7 @@ function App() {
   const setNotes = useAda(s=>s.setNotes), setProfession=useAda(s=>s.setProfession), setDocument=useAda(s=>s.setDocument)
   const setFocused=useAda(s=>s.setFocused), editSection=useAda(s=>s.editSection)
   const [status, setStatus] = useState('Ready')
+  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>('professional')
   const [professionLocked, setProfessionLocked] = useState<Profession | null>(null)
   const [split, setSplit] = useState(50)
   const [historyOpen, setHistoryOpen] = useState(false)
@@ -271,7 +273,11 @@ function App() {
 
   useEffect(() => {
     window.clearTimeout(timer.current)
-    if (!notes.trim()) { setDocument(emptyDoc(profession)); setStatus('Ready'); return }
+    if (!notes.trim() || workspaceMode === 'quick') {
+      if (!notes.trim() && workspaceMode === 'professional') setDocument(emptyDoc(profession))
+      if (!notes.trim()) setStatus('Ready')
+      return
+    }
     timer.current = window.setTimeout(async () => {
       request.current?.abort(); request.current = new AbortController(); setStatus('Updating…')
       try {
@@ -291,7 +297,7 @@ function App() {
       }
     }, 650)
     return () => window.clearTimeout(timer.current)
-  }, [notes, profession])
+  }, [notes, profession, workspaceMode])
 
   function handlePointer(e: React.PointerEvent<HTMLDivElement>) {
     const parent = e.currentTarget.parentElement?.getBoundingClientRect(); if (!parent) return
@@ -301,7 +307,11 @@ function App() {
   return <main className="app">
     <header className="topbar">
       <div className="brand"><div><strong>ada</strong><span>write naturally. structure professionally.</span></div></div>
-      <div className="mode"><span className="locked-mode">{profession==='doctor' ? 'Doctor' : 'Lawyer'} · locked</span></div>
+      <div className="mode-switch" aria-label="Workspace mode">
+        <button className={workspaceMode==='quick' ? 'active' : ''} onClick={()=>{setWorkspaceMode('quick');setStatus(notes.trim()?'Quick note':'Ready')}}>Quick Note</button>
+        <button className={workspaceMode==='professional' ? 'active' : ''} onClick={()=>{setWorkspaceMode('professional');setStatus(notes.trim()?'Updating…':'Ready')}}>Professional Document</button>
+      </div>
+      <span className="locked-mode">{profession==='doctor' ? 'Doctor' : 'Lawyer'} · locked</span>
       <button className="waitlist-button" onClick={()=>goTo("/waitlist")}>Waitlist</button>
       <div className="status"><i></i>{status}</div>
     </header>
@@ -313,9 +323,9 @@ function App() {
       </section>
       <div className="divider" onPointerDown={(e)=>{e.currentTarget.setPointerCapture(e.pointerId); const move=(ev:PointerEvent)=>handlePointer(ev as unknown as React.PointerEvent<HTMLDivElement>); const up=()=>{e.currentTarget.removeEventListener('pointermove',move as any);e.currentTarget.removeEventListener('pointerup',up)};e.currentTarget.addEventListener('pointermove',move as any);e.currentTarget.addEventListener('pointerup',up)}}><span></span></div>
       <section className="pane document-pane">
-        <div className="pane-head"><div><span className="eyebrow">02 · STRUCTURED DOCUMENT</span><h2>{document.title}</h2></div><span className="live-dot">● LIVE</span></div>
-        {document.needs_input.length > 0 && <div className="needs"><strong>Needs input</strong><span>{document.needs_input.join(' · ')}</span></div>}
-        <article className="document">
+        <div className="pane-head"><div><span className="eyebrow">02 · {workspaceMode==='quick' ? 'QUICK OUTPUT' : 'PROFESSIONAL DOCUMENT'}</span><h2>{workspaceMode==='quick' ? 'Quick Note' : document.title}</h2></div><span className="live-dot">● LIVE</span></div>
+        {workspaceMode==='professional' && document.needs_input.length > 0 && <div className="needs"><strong>Needs input</strong><span>{document.needs_input.join(' · ')}</span></div>}
+        {workspaceMode==='quick' ? <article className="document quick-output"><div className="doc-title">Quick Note</div><div className="doc-rule"></div><textarea value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Your note will appear here." /><small>Plain output · no professional structure applied</small></article> : <article className="document">
           <div className="doc-title">{document.title}</div>
           <div className="doc-rule"></div>
           {document.sections.map(section => <section className="doc-section" key={section.id}>
@@ -323,7 +333,7 @@ function App() {
             <textarea value={section.content} onFocus={()=>setFocused(section.id)} onBlur={()=>setFocused(null)} onChange={e=>editSection(section.id,e.target.value)} placeholder="No information provided." />
             {focusedSection===section.id && <small>Editing · your changes are protected while focused</small>}
           </section>)}
-        </article>
+        </article>}
       </section>
     </section>
     <footer><span>Ada 0.1 · human review remains in control</span><span>Documents stay on this device · raw notes stay with Ada</span></footer>

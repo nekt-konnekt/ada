@@ -13,6 +13,7 @@ const DB_VERSION = 2;
 const STORE_NAME = 'notes';
 const ADA_SUPABASE_URL = 'https://husahdwqvoboguaceerd.supabase.co';
 const ADA_SUPABASE_KEY = 'sb_publishable_hxSlGSUqfrpQzunQ66m3EQ_PecORFor';
+const PROFESSION_KEY = 'ada-profession';
 
 function openNotesDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -62,6 +63,14 @@ async function listLocalNotes(): Promise<SavedNote[]> {
     request.onsuccess = () => { db.close(); resolve((request.result as SavedNote[]).sort((a,b) => b.updatedAt.localeCompare(a.updatedAt))); };
     request.onerror = () => { db.close(); reject(request.error); };
   });
+}
+
+async function joinWaitlist(email: string, profession: Profession): Promise<void> {
+  const response = await fetch(ADA_SUPABASE_URL + '/rest/v1/waitlist', {
+    method: 'POST', headers: { apikey: ADA_SUPABASE_KEY, Authorization: 'Bearer ' + ADA_SUPABASE_KEY, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+    body: JSON.stringify({ email: email.trim().toLowerCase(), profession }),
+  });
+  if (!response.ok && response.status !== 409) throw new Error('Could not join the waitlist');
 }
 
 async function saveRawNoteToAda(profession: Profession, notes: string): Promise<void> {
@@ -144,6 +153,10 @@ function App() {
   const setNotes = useAda(s=>s.setNotes), setProfession=useAda(s=>s.setProfession), setDocument=useAda(s=>s.setDocument)
   const setFocused=useAda(s=>s.setFocused), editSection=useAda(s=>s.editSection)
   const [status, setStatus] = useState('Ready')
+  const [waitlistOpen, setWaitlistOpen] = useState(false)
+  const [waitlistEmail, setWaitlistEmail] = useState('')
+  const [waitlistState, setWaitlistState] = useState('Join waitlist')
+  const [professionLocked, setProfessionLocked] = useState<Profession | null>(null)
   const [split, setSplit] = useState(50)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [history, setHistory] = useState<SavedNote[]>([])
@@ -156,6 +169,8 @@ function App() {
 
   useEffect(() => {
     listLocalNotes().then(setHistory).catch(() => setStatus('Local history unavailable'))
+    const savedProfession = localStorage.getItem(PROFESSION_KEY) as Profession | null
+    if (savedProfession === 'doctor' || savedProfession === 'lawyer') { setProfessionLocked(savedProfession); setProfession(savedProfession) }
     try {
       const draft = localStorage.getItem('ada-current-draft')
       if (draft) {
@@ -218,6 +233,20 @@ function App() {
     }
   }
 
+  function chooseProfession(next: Profession) {
+    localStorage.setItem(PROFESSION_KEY, next)
+    setProfessionLocked(next)
+    setProfession(next)
+  }
+
+  async function handleWaitlist() {
+    if (!waitlistEmail.trim()) { setWaitlistState('Enter email'); return }
+    setWaitlistState('Joining…')
+    try { await joinWaitlist(waitlistEmail, profession); setWaitlistState('You’re on the list'); setWaitlistEmail('') }
+    catch { setWaitlistState('Could not join') }
+    window.setTimeout(() => setWaitlistState('Join waitlist'), 2200)
+  }
+
   function openSaved(note: SavedNote) {
     useAda.setState({ profession: note.profession, notes: '', document: note.document, focusedSection: null })
     setHistoryOpen(false)
@@ -261,8 +290,9 @@ function App() {
 
   return <main className="app">
     <header className="topbar">
-      <div className="brand"><div className="logo">a</div><div><strong>ada</strong><span>write naturally. structure professionally.</span></div></div>
-      <div className="mode"><button className={profession==='doctor'?'active':''} onClick={()=>setProfession('doctor')}>Doctor</button><button className={profession==='lawyer'?'active':''} onClick={()=>setProfession('lawyer')}>Lawyer</button></div>
+      <div className="brand"><div><strong>ada</strong><span>write naturally. structure professionally.</span></div></div>
+      <div className="mode"><span className="locked-mode">{profession==='doctor' ? 'Doctor' : 'Lawyer'} · locked</span></div>
+      <button className="waitlist-button" onClick={()=>setWaitlistOpen(true)}>Join waitlist</button>
       <div className="status"><i></i>{status}</div>
     </header>
     <section className="workspace" style={{gridTemplateColumns:`${split}% 8px ${100-split}%`}}>
@@ -287,6 +317,19 @@ function App() {
       </section>
     </section>
     <footer><span>Ada 0.1 · human review remains in control</span><span>Documents stay on this device · raw notes stay with Ada</span></footer>
+    {waitlistOpen && <div className="waitlist-backdrop" onClick={()=>setWaitlistOpen(false)}>
+      <section className="waitlist-card" onClick={e=>e.stopPropagation()}>
+        <button className="close-button" onClick={()=>setWaitlistOpen(false)}>×</button>
+        <span className="eyebrow">EARLY ACCESS</span><h2>Ada is opening soon.</h2>
+        <p>Join the waitlist for early access to the professional note-to-document workspace.</p>
+        <div className="waitlist-profession"><strong>{profession==='doctor' ? 'Doctor' : 'Lawyer'}</strong><span>Your workspace is locked to this role.</span></div>
+        <input className="waitlist-input" type="email" value={waitlistEmail} onChange={e=>setWaitlistEmail(e.target.value)} placeholder="you@example.com" />
+        <button className="waitlist-submit" onClick={handleWaitlist}>{waitlistState}</button>
+      </section>
+    </div>}
+    {professionLocked === null && <div className="lock-backdrop">
+      <section className="lock-card"><span className="eyebrow">ADA PROFESSIONAL WORKSPACE</span><h2>Choose your profession.</h2><p>Ada locks each workspace to one professional role. You cannot switch between Doctor and Lawyer inside the workspace.</p><div className="lock-options"><button onClick={()=>chooseProfession('doctor')}><strong>Doctor</strong><span>Clinical documentation</span></button><button onClick={()=>chooseProfession('lawyer')}><strong>Lawyer</strong><span>Legal case documentation</span></button></div></section>
+    </div>}
     {historyOpen && <div className="history-backdrop" onClick={()=>setHistoryOpen(false)}>
       <aside className="history-panel" onClick={e=>e.stopPropagation()}>
         <div className="history-head"><div><span className="eyebrow">LOCAL STORAGE</span><h2>History</h2><p>Structured documents stay on this device.</p></div><button className="close-button" onClick={()=>setHistoryOpen(false)}>×</button></div>

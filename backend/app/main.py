@@ -169,7 +169,8 @@ def local_structure(profession: Profession, notes: str) -> StructureResponse:
         def join_matching(patterns: list[str]) -> str:
             return " ".join(s for s in ss if any(re.search(pattern, s, re.I) for pattern in patterns))
 
-        chief = next((s for s in ss if re.search(r"\b(chest pain|pain|fever|cough|headache|complain|presented|came in)\b", s, re.I)), "")
+        chief_source = next((s for s in ss if re.search(r"\b(chest pain|pain|fever|cough|headache|complain|presented|came in)\b", s, re.I)), "")
+        chief = re.search(r"\b(chest pain|pain|fever|cough|headache)\b", chief_source, re.I).group(0) if chief_source and re.search(r"\b(chest pain|pain|fever|cough|headache)\b", chief_source, re.I) else chief_source
         negatives = join_matching([r"\bno\s+", r"\bdenies\s+"])
         history_social_family = join_matching([r"\bsmoker\b", r"\bfather\b", r"\bfamily\b", r"\bmedical history\b", r"\bsocial history\b"])
         allergies = join_matching([r"\ballerg"])
@@ -185,7 +186,7 @@ def local_structure(profession: Profession, notes: str) -> StructureResponse:
             r"\bplan:", r"\baspirin\b", r"\btroponin\b", r"\brepeat ECG\b", r"\brefer\b", r"\badvise\b",
             r"\breview\b", r"\bfollow[- ]?up\b"
         ]
-        history = " ".join(s for s in ss if s != chief and not any(re.search(pattern, s, re.I) for pattern in history_excluded))
+        history = " ".join(s for s in ss if (s == chief_source or not any(re.search(pattern, s, re.I) for pattern in history_excluded)) and s != chief)
         sections = [
             {"id": "chief_complaint", "label": "Chief Complaint", "content": chief},
             {"id": "history", "label": "History of Present Illness", "content": history},

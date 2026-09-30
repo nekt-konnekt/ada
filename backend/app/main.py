@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import re
@@ -198,8 +199,11 @@ Raw notes:
     models = [model] if model == "gemini-3.7-flash" else [model, "gemini-3.7-flash"]
 
     last_error: Exception | None = None
+    parsed = None
+    used_model = model
+
     async with httpx.AsyncClient(timeout=45) as client:
-        for candidate_model in models:
+        for index, candidate_model in enumerate(models):
             payload = {
                 "model": candidate_model,
                 "messages": [
@@ -213,72 +217,62 @@ Raw notes:
                     headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
                     json=payload,
                 )
-                if r.status_code in {429, 500, 502, 503, 504} and candidate_model != models[-1]:
-                    await __import__("asyncio").sleep(0.8)
-                    last_error = httpx.HTTPStatusError(
-                        f"Transient Gemini error {r.status_code}",
-                        request=r.request,
-                        response=r,
-                    )
+                if r.status_code in {429, 500, 502, 503, 504} and index < len(models) - 1:
+                    last_error = httpx.HTTPStatusError(f"Transient Gemini error {r.status_code}", request=r.request, response=r)
+                    await asyncio.sleep(0.8)
                     continue
                 r.raise_for_status()
                 data = r.json()
                 content = data["choices"][0]["message"]["content"].strip()
-                if content.startswith("```"):
-                    content = re.sub(r"^```(?:json)?\\s*|\\s*```$", "", content, flags=re.IGNORECASE).strip()
+                if content.startswith("\x60\x60\x60"):
+                    content = re.sub(r"^\x60\x60\x60(?:json)?\\s*|\\s*\x60\x60\x60$", "", content, flags=re.IGNORECASE).strip()
                 parsed = json.loads(content)
+                used_model = candidate_model
                 break
             except httpx.HTTPStatusError as exc:
                 last_error = exc
-                if candidate_model != models[-1] and exc.response.status_code in {429, 500, 502, 503, 504}:
-                    await __import__("asyncio").sleep(0.8)
+                if index < len(models) - 1 and exc.response.status_code in {429, 500, 502, 503, 504}:
+                    await asyncio.sleep(0.8)
                     continue
                 detail = exc.response.text[:2000]
                 raise HTTPException(status_code=502, detail=f"Gemini API error: {detail}") from exc
             except (httpx.RequestError, KeyError, IndexError, json.JSONDecodeError, TypeError, ValueError) as exc:
                 last_error = exc
-                if candidate_model != models[-1]:
-                    await __import__("asyncio").sleep(0.8)
+                if index < len(models) - 1:
+                    await asyncio.sleep(0.8)
                     continue
                 raise HTTPException(status_code=502, detail=f"Gemini response error: {type(exc).__name__}: {exc}") from exc
-        else:
-            if last_error:
-                raise HTTPException(status_code=502, detail=f"Gemini models unavailable: {last_error}")
-            raise HTTPException(status_code=502, detail="Gemini returned no usable response")
-            sections = parsed.get("sections", [])
 
-            valid_ids = set(schema)
-            normalized = []
-            for item in sections:
-                if not isinstance(item, dict) or item.get("id") not in valid_ids:
-                    continue
-                item["label"] = labels[item["id"]]
-                item["content"] = str(item.get("content") or "").strip()
-                normalized.append(item)
+    if parsed is None:
+        raise HTTPException(status_code=502, detail=f"Gemini models unavailable: {last_error}")
 
-            by_id = {item["id"]: item for item in normalized}
-            ordered = [
-                by_id.get(section_id, {"id": section_id, "label": labels[section_id], "content": ""})
-                for section_id in schema
-            ]
+    sections = parsed.get("sections", [])
+    valid_ids = set(schema)
+    normalized = []
+    for item in sections:
+        if not isinstance(item, dict) or item.get("id") not in valid_ids:
+            continue
+        item["label"] = labels[item["id"]]
+        item["content"] = str(item.get("content") or "").strip()
+        normalized.append(item)
 
-            needs = parsed.get("needs_input", [])
-            if not isinstance(needs, list):
-                needs = []
+    by_id = {item["id"]: item for item in normalized}
+    ordered = [
+        by_id.get(section_id, {"id": section_id, "label": labels[section_id], "content": ""})
+        for section_id in schema
+    ]
 
-            return StructureResponse(
-                profession=req.profession,
-                title=parsed.get("title") or ("Clinical Note" if req.profession == "doctor" else "Case Note"),
-                sections=ordered,
-                needs_input=[str(x).strip() for x in needs if str(x).strip()],
-                provider=model,
-            )
-    except httpx.HTTPStatusError as exc:
-        detail = exc.response.text[:2000]
-        raise HTTPException(status_code=502, detail=f"Gemini API error: {detail}") from exc
-    except (httpx.RequestError, KeyError, IndexError, json.JSONDecodeError, TypeError, ValueError) as exc:
-        raise HTTPException(status_code=502, detail=f"Gemini response error: {type(exc).__name__}: {exc}") from exc
+    needs = parsed.get("needs_input", [])
+    if not isinstance(needs, list):
+        needs = []
 
+    return StructureResponse(
+        profession=req.profession,
+        title=parsed.get("title") or ("Clinical Note" if req.profession == "doctor" else "Case Note"),
+        sections=ordered,
+        needs_input=[str(x).strip() for x in needs if str(x).strip()],
+        provider=used_model,
+    )
 
 @app.get("/api/health")
 async def health():

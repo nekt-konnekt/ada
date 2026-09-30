@@ -10,7 +10,7 @@ type Section = { id: string; label: string; content: string }
 type NeedInput = { id: string; question: string; section_id: string }
 type Warning = { section_id: string | null; message: string; token: string }
 type WorkspaceMode = 'quick' | 'professional'
-type DocumentState = { title: string; sections: Section[]; needs_input: NeedInput[]; warnings: Warning[]; unplaced: string[]; provider: string }
+type DocumentState = { title: string; sections: Section[]; needs_input: NeedInput[]; warnings: Warning[]; unplaced: string[]; provider: string; provider_name: string }
 type SavedNote = { id: string; profession: Profession; document: DocumentState; createdAt: string; updatedAt: string }
 
 const DB_NAME = 'ada-local';
@@ -148,6 +148,7 @@ function normalizeDocument(document: any): DocumentState {
     warnings: Array.isArray(document?.warnings) ? document.warnings : [],
     unplaced: Array.isArray(document?.unplaced) ? document.unplaced.map(String) : [],
     provider: String(document?.provider || 'ready'),
+    provider_name: String(document?.provider_name || 'local demo'),
   }
 }
 
@@ -278,7 +279,7 @@ const emptyDoc = (profession: Profession): DocumentState => profession === 'doct
       { id:'observations', label:'Observations / Vitals', content:'' }, { id:'examination', label:'Examination Findings', content:'' },
       { id:'investigations', label:'Investigations', content:'' }, { id:'assessment', label:'Assessment', content:'' },
       { id:'plan', label:'Plan', content:'' }, { id:'follow_up', label:'Follow-up', content:'' }
-    ], needs_input: [], warnings: [], unplaced: [], provider:'ready' }
+    ], needs_input: [], warnings: [], unplaced: [], provider:'ready', provider_name:'local demo' }
   : { title: 'Case Note', sections: [
       { id:'parties', label:'Parties', content:'' }, { id:'facts', label:'Facts / Incident Summary', content:'' },
       { id:'injuries', label:'Injuries / Damages', content:'' }, { id:'liability', label:'Liability / Issues', content:'' },

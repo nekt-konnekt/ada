@@ -11,6 +11,8 @@
   "dependencies": {
     "@paddleocr/paddleocr-js": "0.4.2",
     "@vitejs/plugin-react": "latest",
+    "docx": "9.5.1",
+    "jspdf": "3.0.3",
     "vite": "latest",
     "typescript": "latest",
     "react": "latest",

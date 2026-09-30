@@ -244,11 +244,11 @@ function exportPdf(document: DocumentState): void {
   }
 
   if (document.needs_input.length > 0) {
-    const needs = pdf.splitTextToSize(document.needs_input.join(' · '), contentWidth)
+    const needs = pdf.splitTextToSize(document.needs_input.map(item => item.question).join(' · '), contentWidth)
     ensureSpace(needs.length * 16 + 28)
     pdf.setFont('helvetica', 'bold')
     pdf.setFontSize(10)
-    pdf.text('Needs input', margin, y)
+    pdf.text('Needs your input', margin, y)
     y += 15
     pdf.setFont('helvetica', 'normal')
     pdf.setFontSize(10)
@@ -521,7 +521,7 @@ function App() {
             const isLocked = lockedSections.has(section.id)
             return <section className={"doc-section " + (!section.content.trim() ? "is-empty" : "")} key={section.id}>
               <div className="field-head"><label>{section.label}</label><div className="field-meta">{fieldWarnings.map(warning => <span className="field-warning" key={warning.message}>{warning.message}</span>)}{isLocked ? <button type="button" className="field-lock" onClick={()=>unlockSection(section.id)} title="Unlock this field" aria-label={"Unlock " + section.label}>Locked · unlock</button> : !section.content.trim() ? <span className="field-empty-state">Empty</span> : null}</div></div>
-              <textarea value={section.content} onFocus={()=>setFocused(section.id)} onBlur={()=>setFocused(null)} onChange={e=>{editSection(section.id,e.target.value); e.currentTarget.style.height='auto'; e.currentTarget.style.height=e.currentTarget.scrollHeight+'px'}} onInput={e=>{e.currentTarget.style.height='auto'; e.currentTarget.style.height=e.currentTarget.scrollHeight+'px'}} placeholder="Empty field" />
+              <textarea data-section-id={section.id} value={section.content} onFocus={()=>setFocused(section.id)} onBlur={()=>setFocused(null)} onChange={e=>{editSection(section.id,e.target.value); e.currentTarget.style.height='auto'; e.currentTarget.style.height=e.currentTarget.scrollHeight+'px'}} onInput={e=>{e.currentTarget.style.height='auto'; e.currentTarget.style.height=e.currentTarget.scrollHeight+'px'}} placeholder="Empty field" />
               {focusedSection===section.id && !isLocked && <small>Editing · changes lock this field against later AI updates</small>}
             </section>
           })}

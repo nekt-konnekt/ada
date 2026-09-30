@@ -111,9 +111,9 @@ def local_structure(profession: Profession, notes: str) -> StructureResponse:
 
 
 async def llm_structure(req: StructureRequest) -> StructureResponse | None:
-    base = os.getenv("LLM_BASE_URL", "https://ai-gateway.vercel.sh/v1").strip()
-    key = os.getenv("LLM_API_KEY", "").strip() or os.getenv("AI_GATEWAY_API_KEY", "").strip()
-    model = os.getenv("LLM_MODEL", "openai/gpt-5.6-sol").strip()
+    base = os.getenv("LLM_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai").strip()
+    key = os.getenv("GEMINI_API_KEY", "").strip() or os.getenv("LLM_API_KEY", "").strip()
+    model = os.getenv("LLM_MODEL", "gemini-2.5-flash").strip()
 
     if not key:
         return None
@@ -251,10 +251,10 @@ Raw notes:
 @app.get("/api/health")
 async def health():
     configured = bool(
-        (os.getenv("LLM_API_KEY") or os.getenv("AI_GATEWAY_API_KEY"))
-        and os.getenv("LLM_MODEL", "openai/gpt-5.6-sol")
+        (os.getenv("GEMINI_API_KEY") or os.getenv("LLM_API_KEY"))
+        and os.getenv("LLM_MODEL", "gemini-2.5-flash")
     )
-    return {"ok": True, "version": "0.1.0", "llm_configured": configured}
+    return {"ok": True, "version": "0.1.0", "llm_configured": configured, "model": os.getenv("LLM_MODEL", "gemini-2.5-flash")}
 
 
 @app.post("/api/structure", response_model=StructureResponse)

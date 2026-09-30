@@ -17,6 +17,8 @@ const STORE_NAME = 'notes';
 const ADA_SUPABASE_URL = 'https://husahdwqvoboguaceerd.supabase.co';
 const ADA_SUPABASE_KEY = 'sb_publishable_hxSlGSUqfrpQzunQ66m3EQ_PecORFor';
 const PROFESSION_KEY = 'ada-profession';
+const TERMS_VERSION = '1.0';
+const PRIVACY_VERSION = '1.0';
 
 function openNotesDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -79,10 +81,10 @@ async function deleteLocalNote(id: string): Promise<void> {
     tx.onerror = () => { db.close(); reject(tx.error); };
   });
 }
-async function joinWaitlist(name: string, email: string, phone: string, profession: Profession): Promise<void> {
+async function joinWaitlist(name: string, email: string, phone: string, profession: Profession, agreement: { termsVersion: string; termsAcceptedAt: string; privacyVersion: string; privacyAcknowledgedAt: string; professionalAcknowledgedAt: string }): Promise<void> {
   const response = await fetch(ADA_SUPABASE_URL + '/rest/v1/waitlist', {
     method: 'POST', headers: { apikey: ADA_SUPABASE_KEY, Authorization: 'Bearer ' + ADA_SUPABASE_KEY, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
-    body: JSON.stringify({ name: name.trim(), email: email.trim().toLowerCase(), phone: phone.trim(), profession }),
+    body: JSON.stringify({ name: name.trim(), email: email.trim().toLowerCase(), phone: phone.trim(), profession, terms_version: agreement.termsVersion, terms_accepted_at: agreement.termsAcceptedAt, privacy_version: agreement.privacyVersion, privacy_acknowledged_at: agreement.privacyAcknowledgedAt, professional_acknowledged_at: agreement.professionalAcknowledgedAt }),
   });
   if (!response.ok && response.status !== 409) throw new Error('Could not join the waitlist');
 }
@@ -281,14 +283,21 @@ function PublicPage({ waitlist = false }: { waitlist?: boolean }) {
   const [email, setEmail] = useState('')
   const [phone, setPhone] = useState('')
   const [profession, setProfession] = useState<Profession>('doctor')
+  const [termsAccepted, setTermsAccepted] = useState(false)
+  const [privacyAcknowledged, setPrivacyAcknowledged] = useState(false)
+  const [professionalAcknowledged, setProfessionalAcknowledged] = useState(false)
   const [state, setState] = useState('Join waitlist')
   async function submit() {
     if (!name.trim()) return setState('Enter name')
     if (!email.trim()) return setState('Enter email')
     if (!phone.trim()) return setState('Enter phone')
+    if (!termsAccepted) return setState('Accept the user agreement')
+    if (!privacyAcknowledged) return setState('Acknowledge the privacy notice')
+    if (!professionalAcknowledged) return setState('Acknowledge professional responsibility')
     setState('Joining…')
     try {
-      await joinWaitlist(name, email, phone, profession)
+      const acceptedAt = new Date().toISOString()
+      await joinWaitlist(name, email, phone, profession, { termsVersion: TERMS_VERSION, termsAcceptedAt: acceptedAt, privacyVersion: PRIVACY_VERSION, privacyAcknowledgedAt: acceptedAt, professionalAcknowledgedAt: acceptedAt })
       if (new URLSearchParams(window.location.search).get('from') === 'try') {
         localStorage.setItem('ada-profession', profession)
         goTo('/0.1')
@@ -298,11 +307,14 @@ function PublicPage({ waitlist = false }: { waitlist?: boolean }) {
       setName('')
       setEmail('')
       setPhone('')
+      setTermsAccepted(false)
+      setPrivacyAcknowledged(false)
+      setProfessionalAcknowledged(false)
     }
     catch { setState('Could not join') }
     window.setTimeout(() => setState('Join waitlist'), 2200)
   }
-  if (waitlist) return <main className="public-page"><header className="public-top"><button className="public-brand" onClick={()=>goTo('/')}><strong>ada</strong><span>write naturally. structure professionally.</span></button></header><section className="public-content"><span className="eyebrow">EARLY ACCESS</span><h1>Join the early-access list</h1><p>Ada is being built for doctors and lawyers who want to turn rough notes into structured professional documents without stopping to format everything themselves.</p><div className="public-form"><label>Full name<input className="waitlist-input" value={name} onChange={e=>setName(e.target.value)} placeholder="Your name" autoComplete="name" /></label><label>Email<input className="waitlist-input" type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@example.com" autoComplete="email" /></label><label>Phone number<input className="waitlist-input" type="tel" value={phone} onChange={e=>setPhone(e.target.value)} placeholder="+234 801 234 5678" autoComplete="tel" /></label><div className="public-role"><span>Profession</span><div><button className={profession==='doctor'?'selected':''} onClick={()=>setProfession('doctor')}>Doctor</button><button className={profession==='lawyer'?'selected':''} onClick={()=>setProfession('lawyer')}>Lawyer</button></div></div><button className="waitlist-submit" onClick={submit}>{state}</button></div><div className="public-next"><strong>What happens next</strong><p>We'll contact you when Ada is ready for your professional workspace.</p></div><small className="privacy-note">No spam. Early access updates only.</small></section><footer><span>ada.            2026.            made with ❤️ in 🇳🇬.</span></footer></main>
+  if (waitlist) return <main className="public-page"><header className="public-top"><button className="public-brand" onClick={()=>goTo('/')}><strong>ada</strong><span>write naturally. structure professionally.</span></button></header><section className="public-content"><span className="eyebrow">EARLY ACCESS</span><h1>Join the early-access list</h1><p>Ada is being built for doctors and lawyers who want to turn rough notes into structured professional documents without stopping to format everything themselves.</p><div className="public-form"><label>Full name<input className="waitlist-input" value={name} onChange={e=>setName(e.target.value)} placeholder="Your name" autoComplete="name" /></label><label>Email<input className="waitlist-input" type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@example.com" autoComplete="email" /></label><label>Phone number<input className="waitlist-input" type="tel" value={phone} onChange={e=>setPhone(e.target.value)} placeholder="+234 801 234 5678" autoComplete="tel" /></label><div className="public-role"><span>Profession</span><div><button className={profession==='doctor'?'selected':''} onClick={()=>setProfession('doctor')}>Doctor</button><button className={profession==='lawyer'?'selected':''} onClick={()=>setProfession('lawyer')}>Lawyer</button></div></div><div className="agreement-box"><span className="agreement-title">Before you continue</span><label className="agreement-check"><input type="checkbox" checked={termsAccepted} onChange={e=>setTermsAccepted(e.target.checked)} /><span>I agree to the Ada user agreement (v1.0), including the rules for using Ada as a documentation aid.</span></label><label className="agreement-check"><input type="checkbox" checked={privacyAcknowledged} onChange={e=>setPrivacyAcknowledged(e.target.checked)} /><span>I acknowledge the Privacy Notice (v1.0) and understand that information I submit may be processed to provide Ada.</span></label><label className="agreement-check"><input type="checkbox" checked={professionalAcknowledged} onChange={e=>setProfessionalAcknowledged(e.target.checked)} /><span>I understand that I remain responsible for reviewing, correcting, and approving professional documents before relying on them.</span></label><small className="agreement-note">Ada structures information you provide. It does not replace professional judgment.</small></div><button className="waitlist-submit" onClick={submit}>{state}</button></div><div className="public-next"><strong>What happens next</strong><p>We'll contact you when Ada is ready for your professional workspace.</p></div><small className="privacy-note">No spam. Early access updates only.</small></section><footer><span>ada.            2026.            made with ❤️ in 🇳🇬.</span></footer></main>
   return <main className="public-page"><header className="public-top"><div className="public-brand"><strong>ada</strong><span>write naturally. structure professionally.</span></div></header><section className="public-content"><span className="eyebrow">ADA EARLY ACCESS</span><h1>Professional notes, structured as you work.</h1><p>Ada is being built for doctors and lawyers who want to turn rough notes into structured professional documents without stopping to format everything themselves.</p><section className="public-problems"><span className="eyebrow">THE PROBLEM</span><h2>Your notes don't arrive in professional structure.</h2><div className="public-problem-grid"><article><span className="eyebrow">FOR DOCTORS</span><h3>A patient talks. You observe. You remember.</h3><p>Symptoms, observations, medications and follow-up details come in as the consultation happens. The work of putting them into a proper clinical note comes afterwards.</p></article><article><span className="eyebrow">FOR LAWYERS</span><h3>A client tells you what happened. You collect the pieces.</h3><p>Names, dates, events, allegations, documents and things to verify rarely arrive in the order your case note needs. Structuring them is a separate job.</p></article></div><p className="public-problem-close">Ada lets you scribble naturally. When the work needs a professional document, Ada structures what is actually there and leaves you in control.</p></section><div className="public-actions"><article><span className="eyebrow">ADA 0.1</span><h2>Try Ada 0.1</h2><p>The first working version of Ada is available to try now.</p><button onClick={()=>goTo('/waitlist?from=try')}>Try Ada</button></article><article><span className="eyebrow">EARLY ACCESS</span><h2>Join the early-access list</h2><p>Get notified as Ada opens up to more professionals.</p><button onClick={()=>goTo('/waitlist')}>Join waitlist</button></article></div></section><footer><span>ada.            2026.            made with ❤️ in 🇳🇬.</span></footer></main>
 }
 

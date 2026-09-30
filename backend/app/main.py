@@ -174,6 +174,7 @@ NON-NEGOTIABLE RULES:
 10. Keep the wording concise and professional while preserving the meaning of the source.
 11. Do not treat a future or conditional statement as a completed action. For example, "MRI will confirm the severity" means the MRI is relevant or pending; it does not mean an MRI was ordered, performed, or reviewed.
 12. The user remains the final authority. Do not silently overwrite a user-edited section when its existing content conflicts with a new inference.
+13. When medication or treatment instructions contain ambiguous quantity, dose, strength, unit, route, or frequency wording, preserve the source wording and explicitly flag the ambiguity in needs_input. Never resolve an ambiguous quantity into a clinical dose or frequency. For example, do not turn “ibuprofen 2 daily, morning and night” into “2 doses daily” unless the source explicitly says that.
 
 Return JSON only. No markdown and no commentary.
 

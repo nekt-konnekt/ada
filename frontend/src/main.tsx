@@ -9,7 +9,7 @@ type DocumentState = { title: string; sections: Section[]; needs_input: string[]
 type SavedNote = { id: string; profession: Profession; document: DocumentState; createdAt: string; updatedAt: string }
 
 const DB_NAME = 'ada-local';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE_NAME = 'notes';
 const ADA_SUPABASE_URL = 'https://husahdwqvoboguaceerd.supabase.co';
 const ADA_SUPABASE_KEY = 'sb_publishable_hxSlGSUqfrpQzunQ66m3EQ_PecORFor';
@@ -19,7 +19,25 @@ function openNotesDb(): Promise<IDBDatabase> {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
     request.onupgradeneeded = () => {
       const db = request.result;
-      if (!db.objectStoreNames.contains(STORE_NAME)) db.createObjectStore(STORE_NAME, { keyPath: 'id' });
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        db.createObjectStore(STORE_NAME, { keyPath: 'id' });
+      } else if (request.oldVersion < 2) {
+        const tx = request.transaction;
+        if (tx) {
+          const store = tx.objectStore(STORE_NAME);
+          const cursorRequest = store.openCursor();
+          cursorRequest.onsuccess = () => {
+            const cursor = cursorRequest.result;
+            if (!cursor) return;
+            const value = cursor.value as Record<string, unknown>;
+            if ('notes' in value) {
+              delete value.notes;
+              cursor.update(value);
+            }
+            cursor.continue();
+          };
+        }
+      }
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
@@ -122,6 +140,7 @@ function App() {
         const parsed = JSON.parse(draft) as { profession: Profession; document: DocumentState }
         if (parsed.document) {
           useAda.setState({ profession: parsed.profession, notes: '', document: parsed.document })
+          localStorage.setItem('ada-current-draft', JSON.stringify({ profession: parsed.profession, document: parsed.document }))
           setStatus('Structured draft restored from this device')
         }
       }

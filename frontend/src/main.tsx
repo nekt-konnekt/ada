@@ -18,11 +18,12 @@ const PROFESSION_KEY = 'ada-profession';
 function openNotesDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
-    request.onupgradeneeded = () => {
+    request.onupgradeneeded = (event) => {
       const db = request.result;
+      const oldVersion = (event as IDBVersionChangeEvent).oldVersion;
       if (!db.objectStoreNames.contains(STORE_NAME)) {
         db.createObjectStore(STORE_NAME, { keyPath: 'id' });
-      } else if (request.oldVersion < 2) {
+      } else if (oldVersion < 2) {
         const tx = request.transaction;
         if (tx) {
           const store = tx.objectStore(STORE_NAME);

@@ -472,7 +472,7 @@ function App() {
         </article>}
       </section>
     </section>
-    <footer><span>ada.            2026.            made with ❤️ in 🇳🇬.</span><span>Documents stay on this device · raw notes stay with Ada</span></footer>
+    <footer><span>ada.            2026.            made with ❤️ in 🇳🇬.</span></footer>
     {professionLocked === null && <div className="lock-backdrop">
       <section className="lock-card"><span className="eyebrow">ADA PROFESSIONAL WORKSPACE</span><h2>Choose your profession.</h2><p>Ada locks each workspace to one professional role. You cannot switch between Doctor and Lawyer inside the workspace.</p><div className="lock-options"><button onClick={()=>chooseProfession('doctor')}><strong>Doctor</strong><span>Clinical documentation</span></button><button onClick={()=>chooseProfession('lawyer')}><strong>Lawyer</strong><span>Legal case documentation</span></button></div></section>
     </div>}

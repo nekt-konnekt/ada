@@ -171,15 +171,15 @@ def local_structure(profession: Profession, notes: str) -> StructureResponse:
 
         chief = next((s for s in ss if re.search(r"\b(chest pain|pain|fever|cough|headache|complain|presented|came in)\b", s, re.I)), "")
         negatives = join_matching([r"\bno\s+", r"\bdenies\s+"])
-        history = " ".join(s for s in ss if s not in {chief} and not re.search(r"\b(BP|HR|temp|temperature|ECG|lungs|heart sounds|murmur)\b", s, re.I) and not re.search(r"\b(plan:|review\b|refer\b|advise\b|aspirin\b|troponin\b|repeat ECG)\b", s, re.I))
         history_social_family = join_matching([r"\bsmoker\b", r"\bfather\b", r"\bfamily\b", r"\bmedical history\b", r"\bsocial history\b"])
         allergies = join_matching([r"\ballerg"])
         observations = join_matching([r"\bBP\b", r"\bHR\b", r"\btemp\b"])
         examination = join_matching([r"\blungs\b", r"\bheart sounds\b", r"\bmurmur\b"])
-        investigations = join_matching([r"\bECG\b", r"\btroponin\b"])
+        investigations = join_matching([r"\bECG\s+done\b", r"\bECG\s+result\b", r"\bECG\s+show"])
         assessment = next((s for s in ss if re.search(r"\?\s*angina|\bassessment\b", s, re.I)), "")
         plan = join_matching([r"\bplan:", r"\baspirin\b", r"\btroponin\b", r"\brepeat ECG\b", r"\brefer\b", r"\badvise\b"])
         follow_up = join_matching([r"\breview\b", r"\bfollow[- ]?up\b"])
+        history = " ".join(s for s in ss if s not in {chief, history_social_family, allergies, observations, examination, investigations, assessment, plan, follow_up} and s.strip())
         sections = [
             {"id": "chief_complaint", "label": "Chief Complaint", "content": chief},
             {"id": "history", "label": "History of Present Illness", "content": history},

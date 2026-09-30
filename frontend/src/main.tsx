@@ -284,7 +284,7 @@ const emptyDoc = (profession: Profession): DocumentState => profession === 'doct
       { id:'parties', label:'Parties', content:'' }, { id:'facts', label:'Facts / Incident Summary', content:'' },
       { id:'injuries', label:'Injuries / Damages', content:'' }, { id:'liability', label:'Liability / Issues', content:'' },
       { id:'authorities', label:'Authorities', content:'' }, { id:'evidence', label:'Supporting Information', content:'' }, { id:'next_steps', label:'Next Steps', content:'' }
-    ], needs_input: [], warnings: [], unplaced: [], provider:'ready' }
+    ], needs_input: [], warnings: [], unplaced: [], provider:'ready', provider_name:'local demo' }
 
 const useAda = create<Store>((set) => ({
   profession: 'doctor', notes: '', document: emptyDoc('doctor'), focusedSection: null, lockedSections: new Set<string>(),

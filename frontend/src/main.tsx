@@ -166,7 +166,6 @@ function App() {
   const fileInput = useRef<HTMLInputElement | null>(null)
   const timer = useRef<number | undefined>(undefined)
   const request = useRef<AbortController | null>(null)
-  const first = useRef(true)
 
   useEffect(() => {
     listLocalNotes().then(setHistory).catch(() => setStatus('Local history unavailable'))
@@ -179,7 +178,7 @@ function App() {
         if (parsed.document) {
           useAda.setState({ profession: parsed.profession, notes: '', document: parsed.document })
           localStorage.setItem('ada-current-draft', JSON.stringify({ profession: parsed.profession, document: parsed.document }))
-          setStatus('Structured draft restored from this device')
+          setStatus('Structured document restored from this device')
         }
       }
     } catch {}
@@ -260,7 +259,6 @@ function App() {
   }
 
   useEffect(() => {
-    if (first.current) { first.current=false; return }
     window.clearTimeout(timer.current)
     if (!notes.trim()) { setDocument(emptyDoc(profession)); setStatus('Ready'); return }
     timer.current = window.setTimeout(async () => {

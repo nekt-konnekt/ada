@@ -287,8 +287,8 @@ const emptyDoc = (profession: Profession): DocumentState => profession === 'doct
     ], needs_input: [], warnings: [], unplaced: [], provider:'ready' }
 
 const useAda = create<Store>((set) => ({
-  profession: 'doctor', notes: '', document: emptyDoc('doctor'), focusedSection: null, lockedSections: new Set(),
-  setProfession: (profession) => set({ profession, document: emptyDoc(profession), lockedSections: new Set() }),
+  profession: 'doctor', notes: '', document: emptyDoc('doctor'), focusedSection: null, lockedSections: new Set<string>(),
+  setProfession: (profession) => set({ profession, document: emptyDoc(profession), lockedSections: new Set<string>() }),
   setNotes: (notes) => set({ notes }), setDocument: (document) => set({ document: normalizeDocument(document) }),
   editSection: (id, content) => set(s => { const locked = new Set(s.lockedSections); locked.add(id); return { lockedSections: locked, document: { ...s.document, sections: s.document.sections.map(x => x.id === id ? {...x, content} : x) } } }),
   unlockSection: (id) => set(s => { const locked = new Set(s.lockedSections); locked.delete(id); return { lockedSections: locked } }),
@@ -373,7 +373,7 @@ function App() {
       if (draft) {
         const parsed = JSON.parse(draft) as { profession: Profession; document: DocumentState }
         if (parsed.document) {
-          useAda.setState({ profession: parsed.profession, notes: '', document: normalizeDocument(parsed.document), lockedSections: new Set() })
+          useAda.setState({ profession: parsed.profession, notes: '', document: normalizeDocument(parsed.document), lockedSections: new Set<string>() })
           localStorage.setItem('ada-current-draft', JSON.stringify({ profession: parsed.profession, document: normalizeDocument(parsed.document) }))
           setStatus('Structured document restored from this device')
         }
@@ -437,7 +437,7 @@ function App() {
   }
 
   function openSaved(note: SavedNote) {
-    useAda.setState({ profession: note.profession, notes: '', document: normalizeDocument(note.document), focusedSection: null, lockedSections: new Set() })
+    useAda.setState({ profession: note.profession, notes: '', document: normalizeDocument(note.document), focusedSection: null, lockedSections: new Set<string>() })
     setHistoryOpen(false)
     setStatus('Opened from this device')
   }
@@ -460,7 +460,7 @@ function App() {
   useEffect(() => {
     window.clearTimeout(timer.current)
     if (!notes.trim() || workspaceMode === 'quick') {
-      if (!notes.trim() && workspaceMode === 'professional') { setDocument(emptyDoc(profession)); useAda.setState({ lockedSections: new Set() }) }
+      if (!notes.trim() && workspaceMode === 'professional') { setDocument(emptyDoc(profession)); useAda.setState({ lockedSections: new Set<string>() }) }
       if (!notes.trim()) setStatus('Ready')
       return
     }

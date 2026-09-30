@@ -5,7 +5,7 @@ from typing import Literal
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -202,7 +202,6 @@ Raw notes:
             {"role": "system", "content": "You are a deterministic professional documentation engine. Return valid JSON only."},
             {"role": "user", "content": prompt},
         ],
-        "response_format": {"type": "json_object"},
     }
 
     try:
@@ -214,7 +213,9 @@ Raw notes:
             )
             r.raise_for_status()
             data = r.json()
-            content = data["choices"][0]["message"]["content"]
+            content = data["choices"][0]["message"]["content"].strip()
+            if content.startswith("```"):
+                content = re.sub(r"^```(?:json)?\\s*|\\s*```$", "", content, flags=re.IGNORECASE).strip()
             parsed = json.loads(content)
             sections = parsed.get("sections", [])
 
@@ -244,8 +245,11 @@ Raw notes:
                 needs_input=[str(x).strip() for x in needs if str(x).strip()],
                 provider=model,
             )
-    except Exception:
-        return None
+    except httpx.HTTPStatusError as exc:
+        detail = exc.response.text[:2000]
+        raise HTTPException(status_code=502, detail=f"Gemini API error: {detail}") from exc
+    except (httpx.RequestError, KeyError, IndexError, json.JSONDecodeError, TypeError, ValueError) as exc:
+        raise HTTPException(status_code=502, detail=f"Gemini response error: {type(exc).__name__}: {exc}") from exc
 
 
 @app.get("/api/health")

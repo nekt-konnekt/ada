@@ -124,7 +124,7 @@ async def llm_structure(req: StructureRequest) -> StructureResponse | None:
 - history: chronology and context of the complaint, including what the patient reports.
 - observations: clinician observations, examination findings, measurements, and vitals. Do not place patient beliefs here.
 - assessment: diagnoses or clinical impressions explicitly stated or clearly established by the user's note. If the assessment comes from a clinician observation or another attributed source, preserve that attribution explicitly. Never turn an observation into an independently established diagnosis, and never infer a diagnosis that is not present.
-- plan: treatments, medications, tests, referrals, monitoring, or follow-up the user explicitly intends or documents.
+- plan: treatments, medications, tests, referrals, monitoring, or follow-up the user explicitly intends, orders, or documents. A statement that a test "will confirm" something does not mean the test was ordered or completed.
 """
         labels = {
             "chief_complaint": "Chief Complaint",
@@ -140,7 +140,7 @@ async def llm_structure(req: StructureRequest) -> StructureResponse | None:
 - injuries: physical injury, medical treatment, property damage, or claimed damages explicitly mentioned.
 - liability: legal issues, allegations of fault, defenses, or legal conclusions only when explicitly supplied by the user. Do not invent legal conclusions.
 - evidence: documents, photographs, witnesses, reports, records, or other supporting material explicitly mentioned.
-- next_steps: actions the user explicitly proposes, requests, or identifies as pending.
+- next_steps: actions the user explicitly proposes, requests, or identifies as pending. Do not turn a future condition such as "MRI will confirm" into an instruction that the MRI was ordered.
 """
         labels = {
             "parties": "Parties",
@@ -161,7 +161,8 @@ Read the raw notes as a whole. Identify the role of each statement before assign
 {section_rules}
 
 NON-NEGOTIABLE RULES:
-1. Use only information present in the raw notes. Never invent facts.
+1. First determine whether the raw notes contain material relevant to the selected profession. If they do not, do not manufacture professional meaning merely because a template has a section for it. Preserve only source facts that are genuinely relevant, leave unrelated professional sections empty, and use needs_input for the missing professional context when useful.
+2. Use only information present in the raw notes. Never invent facts.
 2. Never turn a patient's belief into a clinician observation or diagnosis.
 3. Never turn an allegation into an established legal fact.
 4. Preserve uncertainty and attribution: "patient reports", "user states", "clinician observes", "clinician assessment", "alleged", or equivalent wording when the source matters. Never strip attribution merely to make a section sound more definitive.
@@ -171,7 +172,8 @@ NON-NEGOTIABLE RULES:
 8. Empty information stays empty.
 9. needs_input should identify useful missing information only when it is relevant to completing the document. Do not invent a requirement simply because a standard template contains a field.
 10. Keep the wording concise and professional while preserving the meaning of the source.
-11. The user remains the final authority. Do not silently overwrite a user-edited section when its existing content conflicts with a new inference.
+11. Do not treat a future or conditional statement as a completed action. For example, "MRI will confirm the severity" means the MRI is relevant or pending; it does not mean an MRI was ordered, performed, or reviewed.
+12. The user remains the final authority. Do not silently overwrite a user-edited section when its existing content conflicts with a new inference.
 
 Return JSON only. No markdown and no commentary.
 

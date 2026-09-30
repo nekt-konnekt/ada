@@ -263,7 +263,7 @@ const emptyDoc = (profession: Profession): DocumentState => profession === 'doct
   : { title: 'Case Note', sections: [
       { id:'parties', label:'Parties', content:'' }, { id:'facts', label:'Facts / Incident Summary', content:'' },
       { id:'injuries', label:'Injuries / Damages', content:'' }, { id:'liability', label:'Liability / Issues', content:'' },
-      { id:'evidence', label:'Supporting Information', content:'' }, { id:'next_steps', label:'Next Steps', content:'' }
+      { id:'authorities', label:'Authorities', content:'' }, { id:'evidence', label:'Supporting Information', content:'' }, { id:'next_steps', label:'Next Steps', content:'' }
     ], needs_input: [], provider:'ready' }
 
 const useAda = create<Store>((set) => ({

@@ -175,11 +175,6 @@ function App() {
   const setNotes = useAda(s=>s.setNotes), setProfession=useAda(s=>s.setProfession), setDocument=useAda(s=>s.setDocument)
   const setFocused=useAda(s=>s.setFocused), editSection=useAda(s=>s.editSection)
   const [status, setStatus] = useState('Ready')
-  const [waitlistOpen, setWaitlistOpen] = useState(false)
-  const [waitlistName, setWaitlistName] = useState('')
-  const [waitlistEmail, setWaitlistEmail] = useState('')
-  const [waitlistPhone, setWaitlistPhone] = useState('')
-  const [waitlistState, setWaitlistState] = useState('Join waitlist')
   const [professionLocked, setProfessionLocked] = useState<Profession | null>(null)
   const [split, setSplit] = useState(50)
   const [historyOpen, setHistoryOpen] = useState(false)
@@ -261,16 +256,6 @@ function App() {
     localStorage.setItem(PROFESSION_KEY, next)
     setProfessionLocked(next)
     setProfession(next)
-  }
-
-  async function handleWaitlist() {
-    if (!waitlistName.trim()) { setWaitlistState('Enter name'); return }
-    if (!waitlistEmail.trim()) { setWaitlistState('Enter email'); return }
-    if (!waitlistPhone.trim()) { setWaitlistState('Enter phone'); return }
-    setWaitlistState('Joining…')
-    try { await joinWaitlist(waitlistName, waitlistEmail, waitlistPhone, profession); setWaitlistState('You’re on the list'); setWaitlistName(''); setWaitlistEmail(''); setWaitlistPhone('') }
-    catch { setWaitlistState('Could not join') }
-    window.setTimeout(() => setWaitlistState('Join waitlist'), 2200)
   }
 
   function openSaved(note: SavedNote) {

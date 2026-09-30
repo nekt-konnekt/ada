@@ -94,7 +94,13 @@ def local_structure(profession: Profession, notes: str) -> StructureResponse:
     facts = " ".join(s for s in ss if s not in {parties} and any(k in s.lower() for k in ["accident", "hit", "collision", "happened", "driving", "road", "vehicle", "incident"]))
     injuries = " ".join(s for s in ss if any(k in s.lower() for k in ["pain", "injury", "injured", "hospital", "x-ray", "headache", "neck", "back", "medical"]))
     evidence = " ".join(s for s in ss if any(k in s.lower() for k in ["police", "report", "photo", "witness", "record", "xray", "x-ray"]))
-    remainder = " ".join(s for s in ss if s not in {parties, facts, injuries, evidence})
+    authority_matches = re.findall(
+        r"(?i)\b[A-Z][A-Za-z'’.-]+(?:\s+v\.?\s+[A-Z][A-Za-z'’.-]+)+\s*\([^)]*\d{4}[^)]*\)\s*[^.\n]*"
+        r"|\b[A-Z][A-Za-z'’.-]+(?:\s+v\.?\s+[A-Z][A-Za-z'’.-]+)+\s*\(\d{4}\)[^.\n]*",
+        notes,
+    )
+    authorities = "; ".join(clean(match) for match in authority_matches)
+    remainder = " ".join(s for s in ss if s not in {parties, facts, injuries, evidence} and not any(clean(match) in s for match in authority_matches))
     missing = []
     if not re.search(r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b|\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b", lower):
         missing.append("Incident date")
@@ -105,6 +111,7 @@ def local_structure(profession: Profession, notes: str) -> StructureResponse:
         {"id": "facts", "label": "Facts / Incident Summary", "content": facts or remainder},
         {"id": "injuries", "label": "Injuries / Damages", "content": injuries},
         {"id": "liability", "label": "Liability / Issues", "content": ""},
+        {"id": "authorities", "label": "Authorities", "content": authorities},
         {"id": "evidence", "label": "Supporting Information", "content": evidence},
         {"id": "next_steps", "label": "Next Steps", "content": remainder if facts else ""},
     ]
@@ -139,6 +146,7 @@ async def llm_structure(req: StructureRequest) -> StructureResponse | None:
 - facts: factual events and chronology stated by the user. Keep allegations attributed and do not convert allegations into established facts.
 - injuries: physical injury, medical treatment, property damage, or claimed damages explicitly mentioned.
 - liability: legal issues, allegations of fault, defenses, or legal conclusions only when explicitly supplied by the user. Do not invent legal conclusions.
+- authorities: cases, statutes, regulations, rules, or other legal authorities explicitly cited or named by the user. Preserve the citation or authority name as supplied. Do not infer or summarize the legal proposition of an authority unless the user states it.
 - evidence: documents, photographs, witnesses, reports, records, or other supporting material explicitly mentioned.
 - next_steps: actions the user explicitly proposes, requests, or identifies as pending. Do not turn a future condition such as "MRI will confirm" into an instruction that the MRI was ordered.
 """
@@ -166,7 +174,8 @@ NON-NEGOTIABLE RULES:
 2. Never turn a patient's belief into a clinician observation or diagnosis.
 3. Never turn an allegation into an established legal fact.
 4. Preserve uncertainty and attribution: "patient reports", "user states", "clinician observes", "clinician assessment", "alleged", or equivalent wording when the source matters. Never strip attribution merely to make a section sound more definitive.
-5. Preserve the user's intended actions as intentions, not completed actions. For example, "I intend to prescribe..." is not "prescribed."
+5. When the user cites a legal authority, recognize it as an authority and place it in the authorities section. Preserve the authority name and citation as supplied. Keep the user's stated legal issue or question separate from the authority. Do not claim what the authority holds unless the raw notes state that proposition.
+6. Preserve the user's intended actions as intentions, not completed actions. For example, "I intend to prescribe..." is not "prescribed."
 6. Do not copy the entire raw note into a generic section. Each statement should go to its most appropriate section, and a statement should not be duplicated unless necessary for clarity.
 7. Do not infer missing dates, dosages, measurements, names, diagnoses, liability, or other professional conclusions.
 8. Empty information stays empty.
@@ -174,7 +183,8 @@ NON-NEGOTIABLE RULES:
 10. Keep the wording concise and professional while preserving the meaning of the source.
 11. Do not treat a future or conditional statement as a completed action. For example, "MRI will confirm the severity" means the MRI is relevant or pending; it does not mean an MRI was ordered, performed, or reviewed.
 12. The user remains the final authority. Do not silently overwrite a user-edited section when its existing content conflicts with a new inference.
-13. When medication or treatment instructions contain ambiguous quantity, dose, strength, unit, route, or frequency wording, preserve the source wording and explicitly flag the ambiguity in needs_input. Never resolve an ambiguous quantity into a clinical dose or frequency. For example, do not turn “ibuprofen 2 daily, morning and night” into “2 doses daily” unless the source explicitly says that.
+13. Legal authorities are source material, not proof of a legal conclusion. Preserve them without adding propositions not stated in the raw notes.
+14. When medication or treatment instructions contain ambiguous quantity, dose, strength, unit, route, or frequency wording, preserve the source wording and explicitly flag the ambiguity in needs_input. Never resolve an ambiguous quantity into a clinical dose or frequency. For example, do not turn “ibuprofen 2 daily, morning and night” into “2 doses daily” unless the source explicitly says that.
 
 Return JSON only. No markdown and no commentary.
 

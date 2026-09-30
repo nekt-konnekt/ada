@@ -119,27 +119,26 @@ function App() {
     try {
       const draft = localStorage.getItem('ada-current-draft')
       if (draft) {
-        const parsed = JSON.parse(draft) as { profession: Profession; notes: string; document: DocumentState }
-        if (parsed.notes) {
-          useAda.setState({ profession: parsed.profession, notes: parsed.notes, document: parsed.document })
-          setStatus('Draft restored from this device')
+        const parsed = JSON.parse(draft) as { profession: Profession; document: DocumentState }
+        if (parsed.document) {
+          useAda.setState({ profession: parsed.profession, notes: '', document: parsed.document })
+          setStatus('Structured draft restored from this device')
         }
       }
     } catch {}
   }, [])
 
   useEffect(() => {
-    try { localStorage.setItem('ada-current-draft', JSON.stringify({ profession, notes, document })) } catch {}
+    try { localStorage.setItem('ada-current-draft', JSON.stringify({ profession, document })) } catch {}
   }, [profession, notes, document])
 
   async function handleSave() {
     if (!notes.trim()) { setSaveState('Write a note first'); return }
     setSaveState('Saving…')
     const now = new Date().toISOString()
-    const existing = history.find(x => x.notes === notes && x.profession === profession)
     const saved: SavedNote = {
-      id: existing?.id || crypto.randomUUID(), profession, document,
-      createdAt: existing?.createdAt || now, updatedAt: now
+      id: crypto.randomUUID(), profession, document,
+      createdAt: now, updatedAt: now
     }
     try {
       await saveRawNoteToAda(profession, notes)

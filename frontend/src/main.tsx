@@ -86,13 +86,7 @@ async function runPaddleOcr(file: File): Promise<string> {
       PaddleOCR.create({
         lang: 'en',
         ocrVersion: 'PP-OCRv5',
-        worker: true,
-        ortOptions: {
-          backend: 'wasm',
-          wasmPaths: 'https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/',
-          numThreads: 2,
-          simd: true,
-        },
+        ortOptions: { backend: 'auto' },
       })
     );
   }

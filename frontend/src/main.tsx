@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { create } from 'zustand'
+import { Document, HeadingLevel, Packer, Paragraph, TextRun } from 'docx'
+import { jsPDF } from 'jspdf'
 import './styles.css'
 
 type Profession = 'doctor' | 'lawyer'
@@ -109,14 +111,126 @@ async function runPaddleOcr(file: File): Promise<string> {
     .join('\n');
 }
 
-async function deleteLocalNote(id: string): Promise<void> {
-  const db = await openNotesDb();
-  await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, 'readwrite');
-    tx.objectStore(STORE_NAME).delete(id);
-    tx.oncomplete = () => { db.close(); resolve(); };
-    tx.onerror = () => { db.close(); reject(tx.error); };
-  });
+
+
+function safeFilePart(value: string): string {
+  return value
+    .replace(/[^a-z0-9]+/gi, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 60) || 'Professional_Document'
+}
+
+function exportBaseName(document: DocumentState): string {
+  const date = new Date().toISOString().slice(0, 10)
+  return `Ada_${safeFilePart(document.title)}_${date}`
+}
+
+function documentExportText(document: DocumentState): Array<{ label: string; content: string }> {
+  return document.sections
+    .filter(section => section.content.trim())
+    .map(section => ({ label: section.label, content: section.content.trim() }))
+}
+
+async function exportDocx(document: DocumentState): Promise<void> {
+  const children: Paragraph[] = [
+    new Paragraph({
+      text: document.title,
+      heading: HeadingLevel.TITLE,
+      spacing: { after: 280 },
+    }),
+  ]
+
+  for (const section of documentExportText(document)) {
+    children.push(
+      new Paragraph({
+        children: [new TextRun({ text: section.label, bold: true })],
+        heading: HeadingLevel.HEADING_2,
+        spacing: { before: 220, after: 100 },
+      }),
+      new Paragraph({
+        children: [new TextRun(section.content)],
+        spacing: { after: 160 },
+      }),
+    )
+  }
+
+  if (document.needs_input.length > 0) {
+    children.push(
+      new Paragraph({
+        children: [new TextRun({ text: 'Needs input', bold: true })],
+        heading: HeadingLevel.HEADING_2,
+        spacing: { before: 220, after: 100 },
+      }),
+      new Paragraph({
+        children: [new TextRun(document.needs_input.join(' · '))],
+      }),
+    )
+  }
+
+  const doc = new Document({
+    sections: [{ properties: {}, children }],
+  })
+  const blob = await Packer.toBlob(doc)
+  const url = URL.createObjectURL(blob)
+  const link = window.document.createElement('a')
+  link.href = url
+  link.download = `${exportBaseName(document)}.docx`
+  link.click()
+  URL.revokeObjectURL(url)
+}
+
+function exportPdf(document: DocumentState): void {
+  const pdf = new jsPDF({ unit: 'pt', format: 'a4' })
+  const margin = 54
+  const pageWidth = pdf.internal.pageSize.getWidth()
+  const pageHeight = pdf.internal.pageSize.getHeight()
+  const contentWidth = pageWidth - margin * 2
+  let y = 64
+
+  const ensureSpace = (height: number) => {
+    if (y + height > pageHeight - margin) {
+      pdf.addPage()
+      y = margin
+    }
+  }
+
+  pdf.setFont('helvetica', 'bold')
+  pdf.setFontSize(20)
+  const titleLines = pdf.splitTextToSize(document.title, contentWidth)
+  ensureSpace(titleLines.length * 24)
+  pdf.text(titleLines, margin, y)
+  y += titleLines.length * 24 + 18
+
+  for (const section of documentExportText(document)) {
+    const labelLines = pdf.splitTextToSize(section.label, contentWidth)
+    const bodyLines = pdf.splitTextToSize(section.content, contentWidth)
+    const bodyHeight = bodyLines.length * 16
+    ensureSpace(labelLines.length * 16 + bodyHeight + 24)
+
+    pdf.setFont('helvetica', 'bold')
+    pdf.setFontSize(10)
+    pdf.text(labelLines, margin, y)
+    y += labelLines.length * 16 + 5
+
+    pdf.setFont('helvetica', 'normal')
+    pdf.setFontSize(11)
+    pdf.text(bodyLines, margin, y)
+    y += bodyHeight + 18
+  }
+
+  if (document.needs_input.length > 0) {
+    const needs = pdf.splitTextToSize(document.needs_input.join(' · '), contentWidth)
+    ensureSpace(needs.length * 16 + 28)
+    pdf.setFont('helvetica', 'bold')
+    pdf.setFontSize(10)
+    pdf.text('Needs input', margin, y)
+    y += 15
+    pdf.setFont('helvetica', 'normal')
+    pdf.setFontSize(10)
+    pdf.text(needs, margin, y)
+  }
+
+  pdf.save(`${exportBaseName(document)}.pdf`)
 }
 
 type Store = {
@@ -195,6 +309,7 @@ function App() {
   const [saveState, setSaveState] = useState('Save Note')
   const [scanState, setScanState] = useState('Scan note')
   const [actionsOpen, setActionsOpen] = useState(false)
+  const [exportState, setExportState] = useState<'idle' | 'docx' | 'pdf'>('idle')
   const fileInput = useRef<HTMLInputElement | null>(null)
   const timer = useRef<number | undefined>(undefined)
   const request = useRef<AbortController | null>(null)
@@ -330,7 +445,7 @@ function App() {
       <section className="pane notes-pane">
         <div className="pane-head"><div><span className="eyebrow">01 · YOUR NOTES</span><h2>Write however you think.</h2></div><div className="head-actions"><span className="hint">{notes.length.toLocaleString()} chars</span><button className="history-button" onClick={()=>setHistoryOpen(true)}>History{history.length ? <b>{history.length}</b> : null}</button></div></div>
         <textarea autoFocus value={notes} onChange={e=>setNotes(e.target.value)} placeholder={profession==='doctor' ? 'Start scribbling…\n\npatient came in complaining of chest pain since yesterday…' : 'Start scribbling…\n\nclient was driving home when the other vehicle…'} />
-        <div className="note-foot"><span>Anything goes. Ada will organize what is actually present.</span><div className="note-actions"><button className="menu-button" aria-label="Note actions" title="Note actions" aria-expanded={actionsOpen} onClick={()=>setActionsOpen(value=>!value)}><span className="hamburger-icon" aria-hidden="true"><i></i><i></i><i></i></span></button>{actionsOpen && <div className="actions-menu"><input ref={fileInput} className="scan-input" type="file" accept="image/*" capture="environment" onChange={e=>{const file=e.target.files?.[0]; if(file) { void handleScan(file); setActionsOpen(false) }}} /><button className="menu-item" onClick={()=>fileInput.current?.click()}>{scanState}</button><button className="menu-item menu-save" onClick={()=>{void handleSave(); setActionsOpen(false)}}>{saveState}</button><button className="menu-item" onClick={()=>{setNotes(''); setActionsOpen(false)}}>Clear</button></div>}</div></div>
+        <div className="note-foot"><span>Anything goes. Ada will organize what is actually present.</span><div className="note-actions"><button className="menu-button" aria-label="Note actions" title="Note actions" aria-expanded={actionsOpen} onClick={()=>setActionsOpen(value=>!value)}><span className="hamburger-icon" aria-hidden="true"><i></i><i></i><i></i></span></button>{actionsOpen && <div className="actions-menu"><input ref={fileInput} className="scan-input" type="file" accept="image/*" capture="environment" onChange={e=>{const file=e.target.files?.[0]; if(file) { void handleScan(file); setActionsOpen(false) }}} /><button className="menu-item" onClick={()=>fileInput.current?.click()}>{scanState}</button><button className="menu-item menu-save" onClick={()=>{void handleSave(); setActionsOpen(false)}}>{saveState}</button><button className="menu-item" disabled={workspaceMode !== 'professional' || exportState !== 'idle'} onClick={async()=>{setExportState('docx'); setStatus('Preparing DOCX…'); try { await exportDocx(document); setStatus('DOCX saved to device') } catch (e) { setStatus('DOCX export failed: ' + (e as Error).message) } finally { setExportState('idle'); setActionsOpen(false) }}}>{exportState === 'docx' ? 'Preparing…' : 'Save as DOCX'}</button><button className="menu-item" disabled={workspaceMode !== 'professional' || exportState !== 'idle'} onClick={()=>{setExportState('pdf'); setStatus('Preparing PDF…'); try { exportPdf(document); setStatus('PDF saved to device') } catch (e) { setStatus('PDF export failed: ' + (e as Error).message) } finally { setExportState('idle'); setActionsOpen(false) }}}>{exportState === 'pdf' ? 'Preparing…' : 'Save as PDF'}</button><button className="menu-item" onClick={()=>{setNotes(''); setActionsOpen(false)}}>Clear</button></div>}</div></div>
       </section>
       <div className="divider" onPointerDown={(e)=>{e.currentTarget.setPointerCapture(e.pointerId); const move=(ev:PointerEvent)=>handlePointer(ev as unknown as React.PointerEvent<HTMLDivElement>); const up=()=>{e.currentTarget.removeEventListener('pointermove',move as any);e.currentTarget.removeEventListener('pointerup',up)};e.currentTarget.addEventListener('pointermove',move as any);e.currentTarget.addEventListener('pointerup',up)}}><span></span></div>
       <section className="pane document-pane">

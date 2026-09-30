@@ -195,7 +195,7 @@ Raw notes:
 """
 
     models = []
-    for candidate in [configured_model, "gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-flash-latest"]:
+    for candidate in [configured_model, "gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-flash-latest"]:
         if candidate and candidate not in models:
             models.append(candidate)
 

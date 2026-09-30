@@ -56,10 +56,19 @@ function App() {
       request.current?.abort(); request.current = new AbortController(); setStatus('Updating…')
       try {
         const r = await fetch('/api/structure', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({profession, notes, current_document:document}), signal:request.current.signal })
-        if (!r.ok) throw new Error('Request failed')
+        if (!r.ok) {
+          let detail = 'Request failed'
+          try {
+            const errorBody = await r.json()
+            if (typeof errorBody?.detail === 'string') detail = errorBody.detail
+          } catch {}
+          throw new Error(detail)
+        }
         const next = await r.json() as DocumentState & { profession: Profession }
         setDocument(next); setStatus(next.provider === 'local-demo' ? 'Local demo engine' : `Live: ${next.provider}`)
-      } catch (e) { if ((e as Error).name !== 'AbortError') setStatus('Could not update') }
+      } catch (e) {
+        if ((e as Error).name !== 'AbortError') setStatus('Could not update: ' + (e as Error).message)
+      }
     }, 650)
     return () => window.clearTimeout(timer.current)
   }, [notes, profession])

@@ -38,6 +38,7 @@ class StructureResponse(BaseModel):
     warnings: list[dict] = Field(default_factory=list)
     unplaced: list[str] = Field(default_factory=list)
     provider: str
+    provider_name: str = "local demo"
 
 
 def clean(text: str) -> str:
@@ -444,6 +445,7 @@ Raw notes:
         sections=ordered,
         needs_input=normalized_needs,
         provider=used_model,
+        provider_name=provider,
     )
     response.warnings = validate_fidelity(req.notes, req.current_document, response)
     response.unplaced = completeness_check(req.notes, response)

@@ -9,7 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@paddleocr/paddleocr-js": "latest",
+    "@paddleocr/paddleocr-js": "0.4.2",
     "@vitejs/plugin-react": "latest",
     "vite": "latest",
     "typescript": "latest",

@@ -434,10 +434,10 @@ Raw notes:
                 normalized_needs.append({
                     "id": str(item.get("id") or "needs_input"),
                     "question": question,
-                    "section_id": str(item.get("section_id") or ""),
+                    "section_id": str(item.get("section_id") or ("plan" if req.profession == "doctor" else "next_steps")),
                 })
         elif str(item).strip():
-            normalized_needs.append({"id": "needs_input", "question": str(item).strip(), "section_id": ""})
+            normalized_needs.append({"id": "needs_input", "question": str(item).strip(), "section_id": "plan" if req.profession == "doctor" else "next_steps"})
 
     response = StructureResponse(
         profession=req.profession,

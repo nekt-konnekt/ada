@@ -6,6 +6,53 @@ import './styles.css'
 type Profession = 'doctor' | 'lawyer'
 type Section = { id: string; label: string; content: string }
 type DocumentState = { title: string; sections: Section[]; needs_input: string[]; provider: string }
+type SavedNote = { id: string; profession: Profession; notes: string; document: DocumentState; createdAt: string; updatedAt: string }
+
+const DB_NAME = 'ada-local';
+const DB_VERSION = 1;
+const STORE_NAME = 'notes';
+
+function openNotesDb(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(STORE_NAME)) db.createObjectStore(STORE_NAME, { keyPath: 'id' });
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function saveLocalNote(note: SavedNote): Promise<void> {
+  const db = await openNotesDb();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    tx.objectStore(STORE_NAME).put(note);
+    tx.oncomplete = () => { db.close(); resolve(); };
+    tx.onerror = () => { db.close(); reject(tx.error); };
+  });
+}
+
+async function listLocalNotes(): Promise<SavedNote[]> {
+  const db = await openNotesDb();
+  return await new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, 'readonly');
+    const request = tx.objectStore(STORE_NAME).getAll();
+    request.onsuccess = () => { db.close(); resolve((request.result as SavedNote[]).sort((a,b) => b.updatedAt.localeCompare(a.updatedAt))); };
+    request.onerror = () => { db.close(); reject(request.error); };
+  });
+}
+
+async function deleteLocalNote(id: string): Promise<void> {
+  const db = await openNotesDb();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    tx.objectStore(STORE_NAME).delete(id);
+    tx.oncomplete = () => { db.close(); resolve(); };
+    tx.onerror = () => { db.close(); reject(tx.error); };
+  });
+}
 
 type Store = {
   profession: Profession
@@ -44,9 +91,61 @@ function App() {
   const setFocused=useAda(s=>s.setFocused), editSection=useAda(s=>s.editSection)
   const [status, setStatus] = useState('Ready')
   const [split, setSplit] = useState(50)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [history, setHistory] = useState<SavedNote[]>([])
+  const [saveState, setSaveState] = useState('Save Note')
   const timer = useRef<number | undefined>(undefined)
   const request = useRef<AbortController | null>(null)
   const first = useRef(true)
+
+  useEffect(() => {
+    listLocalNotes().then(setHistory).catch(() => setStatus('Local history unavailable'))
+    try {
+      const draft = localStorage.getItem('ada-current-draft')
+      if (draft) {
+        const parsed = JSON.parse(draft) as { profession: Profession; notes: string; document: DocumentState }
+        if (parsed.notes) {
+          useAda.setState({ profession: parsed.profession, notes: parsed.notes, document: parsed.document })
+          setStatus('Draft restored from this device')
+        }
+      }
+    } catch {}
+  }, [])
+
+  useEffect(() => {
+    try { localStorage.setItem('ada-current-draft', JSON.stringify({ profession, notes, document })) } catch {}
+  }, [profession, notes, document])
+
+  async function handleSave() {
+    if (!notes.trim()) { setSaveState('Write a note first'); return }
+    setSaveState('Saving…')
+    const now = new Date().toISOString()
+    const existing = history.find(x => x.notes === notes && x.profession === profession)
+    const saved: SavedNote = {
+      id: existing?.id || crypto.randomUUID(), profession, notes, document,
+      createdAt: existing?.createdAt || now, updatedAt: now
+    }
+    try {
+      await saveLocalNote(saved)
+      const next = await listLocalNotes()
+      setHistory(next)
+      setSaveState('Saved to this device')
+      window.setTimeout(() => setSaveState('Save Note'), 1800)
+    } catch {
+      setSaveState('Could not save locally')
+    }
+  }
+
+  function openSaved(note: SavedNote) {
+    useAda.setState({ profession: note.profession, notes: note.notes, document: note.document, focusedSection: null })
+    setHistoryOpen(false)
+    setStatus('Opened from this device')
+  }
+
+  async function removeSaved(id: string) {
+    await deleteLocalNote(id)
+    setHistory(await listLocalNotes())
+  }
 
   useEffect(() => {
     if (first.current) { first.current=false; return }
@@ -86,9 +185,9 @@ function App() {
     </header>
     <section className="workspace" style={{gridTemplateColumns:`${split}% 8px ${100-split}%`}}>
       <section className="pane notes-pane">
-        <div className="pane-head"><div><span className="eyebrow">01 · YOUR NOTES</span><h2>Write however you think.</h2></div><span className="hint">{notes.length.toLocaleString()} chars</span></div>
+        <div className="pane-head"><div><span className="eyebrow">01 · YOUR NOTES</span><h2>Write however you think.</h2></div><div className="head-actions"><span className="hint">{notes.length.toLocaleString()} chars</span><button className="history-button" onClick={()=>setHistoryOpen(true)}>History{history.length ? <b>{history.length}</b> : null}</button></div></div>
         <textarea autoFocus value={notes} onChange={e=>setNotes(e.target.value)} placeholder={profession==='doctor' ? 'Start scribbling…\n\npatient came in complaining of chest pain since yesterday…' : 'Start scribbling…\n\nclient was driving home when the other vehicle…'} />
-        <div className="note-foot"><span>Anything goes. Ada will organize what is actually present.</span><button onClick={()=>setNotes('')}>Clear</button></div>
+        <div className="note-foot"><span>Anything goes. Ada will organize what is actually present.</span><div><button className="save-button" onClick={handleSave}>{saveState}</button><button onClick={()=>setNotes('')}>Clear</button></div></div>
       </section>
       <div className="divider" onPointerDown={(e)=>{e.currentTarget.setPointerCapture(e.pointerId); const move=(ev:PointerEvent)=>handlePointer(ev as unknown as React.PointerEvent<HTMLDivElement>); const up=()=>{e.currentTarget.removeEventListener('pointermove',move as any);e.currentTarget.removeEventListener('pointerup',up)};e.currentTarget.addEventListener('pointermove',move as any);e.currentTarget.addEventListener('pointerup',up)}}><span></span></div>
       <section className="pane document-pane">
@@ -105,7 +204,18 @@ function App() {
         </article>
       </section>
     </section>
-    <footer><span>Ada 0.1 · human review remains in control</span><span>{profession === 'doctor' ? 'Clinical workspace' : 'Legal workspace'}</span></footer>
+    <footer><span>Ada 0.1 · human review remains in control</span><span>Saved notes stay on this device</span></footer>
+    {historyOpen && <div className="history-backdrop" onClick={()=>setHistoryOpen(false)}>
+      <aside className="history-panel" onClick={e=>e.stopPropagation()}>
+        <div className="history-head"><div><span className="eyebrow">LOCAL STORAGE</span><h2>History</h2><p>Saved notes stay on this device.</p></div><button className="close-button" onClick={()=>setHistoryOpen(false)}>×</button></div>
+        <div className="history-list">
+          {history.length === 0 ? <div className="history-empty"><strong>No saved notes yet.</strong><span>Finish a note, then use Save Note.</span></div> : history.map(note => <article className="history-item" key={note.id}>
+            <button className="history-open" onClick={()=>openSaved(note)}><span className="history-title">{note.document.title}</span><strong>{note.notes.split(/\\s+/).slice(0,8).join(' ')}{note.notes.split(/\\s+/).length>8?'…':''}</strong><small>{note.profession === 'doctor' ? 'Doctor' : 'Lawyer'} · {new Date(note.updatedAt).toLocaleString([], {day:'numeric',month:'short',hour:'numeric',minute:'2-digit'})}</small></button>
+            <button className="delete-button" aria-label="Delete saved note" onClick={()=>removeSaved(note.id)}>Delete</button>
+          </article>)}
+        </div>
+      </aside>
+    </div>}
   </main>
 }
 

@@ -55,7 +55,7 @@ function App() {
     timer.current = window.setTimeout(async () => {
       request.current?.abort(); request.current = new AbortController(); setStatus('Updating…')
       try {
-        const r = await fetch('http://localhost:8000/api/structure', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({profession, notes, current_document:document}), signal:request.current.signal })
+        const r = await fetch('/api/structure', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({profession, notes, current_document:document}), signal:request.current.signal })
         if (!r.ok) throw new Error('Request failed')
         const next = await r.json() as DocumentState & { profession: Profession }
         setDocument(next); setStatus(next.provider === 'local-demo' ? 'Local demo engine' : `Live: ${next.provider}`)

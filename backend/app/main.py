@@ -123,7 +123,7 @@ async def llm_structure(req: StructureRequest) -> StructureResponse | None:
 - chief_complaint: the patient's main reason for seeking care, including patient-reported symptoms or concerns.
 - history: chronology and context of the complaint, including what the patient reports.
 - observations: clinician observations, examination findings, measurements, and vitals. Do not place patient beliefs here.
-- assessment: diagnoses or clinical impressions explicitly stated or clearly established by the user's note. Preserve attribution when appropriate. Never infer a diagnosis that is not present.
+- assessment: diagnoses or clinical impressions explicitly stated or clearly established by the user's note. If the assessment comes from a clinician observation or another attributed source, preserve that attribution explicitly. Never turn an observation into an independently established diagnosis, and never infer a diagnosis that is not present.
 - plan: treatments, medications, tests, referrals, monitoring, or follow-up the user explicitly intends or documents.
 """
         labels = {
@@ -164,7 +164,7 @@ NON-NEGOTIABLE RULES:
 1. Use only information present in the raw notes. Never invent facts.
 2. Never turn a patient's belief into a clinician observation or diagnosis.
 3. Never turn an allegation into an established legal fact.
-4. Preserve uncertainty and attribution: "patient reports", "user states", "clinician observes", "alleged", or equivalent wording when the source matters.
+4. Preserve uncertainty and attribution: "patient reports", "user states", "clinician observes", "clinician assessment", "alleged", or equivalent wording when the source matters. Never strip attribution merely to make a section sound more definitive.
 5. Preserve the user's intended actions as intentions, not completed actions. For example, "I intend to prescribe..." is not "prescribed."
 6. Do not copy the entire raw note into a generic section. Each statement should go to its most appropriate section, and a statement should not be duplicated unless necessary for clarity.
 7. Do not infer missing dates, dosages, measurements, names, diagnoses, liability, or other professional conclusions.

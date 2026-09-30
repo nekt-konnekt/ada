@@ -125,6 +125,16 @@ def completeness_check(notes: str, response: StructureResponse) -> list[str]:
             unplaced.append(sentence)
     return unplaced
 
+def _is_note_instruction(sentence: str) -> bool:
+    lowered = sentence.lower()
+    return any(marker in lowered for marker in [
+        "ignore your rules",
+        "ignore the rules",
+        "ignore previous instructions",
+        "write that the patient has",
+        "follow these instructions",
+    ])
+
 def local_structure(profession: Profession, notes: str) -> StructureResponse:
     if not notes.strip():
         if profession == "doctor":
@@ -152,8 +162,8 @@ def local_structure(profession: Profession, notes: str) -> StructureResponse:
         ]
         return StructureResponse(profession=profession, title="Case Note", sections=sections, provider="local-demo")
 
-    ss = sentences(notes)
-    lower = notes.lower()
+    ss = [sentence for sentence in sentences(notes) if not _is_note_instruction(sentence)]
+    lower = " ".join(ss).lower()
 
     if profession == "doctor":
         def join_matching(patterns: list[str]) -> str:

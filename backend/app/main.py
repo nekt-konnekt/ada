@@ -112,9 +112,8 @@ def local_structure(profession: Profession, notes: str) -> StructureResponse:
 
 
 async def llm_structure(req: StructureRequest) -> StructureResponse | None:
-    base = os.getenv("LLM_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai").strip()
     key = os.getenv("GEMINI_API_KEY", "").strip() or os.getenv("LLM_API_KEY", "").strip()
-    model = os.getenv("LLM_MODEL", "gemini-3.8-flash").strip()
+    configured_model = os.getenv("LLM_MODEL", "gemini-flash-latest").strip()
 
     if not key:
         return None
@@ -195,53 +194,83 @@ Raw notes:
 {req.notes}
 """
 
-    url = base.rstrip("/") + "/chat/completions"
-    models = [model] if model == "gemini-3.7-flash" else [model, "gemini-3.7-flash"]
+    models = []
+    for candidate in [configured_model, "gemini-flash-latest", "gemini-3.7-flash"]:
+        if candidate and candidate not in models:
+            models.append(candidate)
 
     last_error: Exception | None = None
     parsed = None
-    used_model = model
+    used_model = configured_model
 
     async with httpx.AsyncClient(timeout=45) as client:
         for index, candidate_model in enumerate(models):
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/\${candidate_model}:generateContent"
             payload = {
-                "model": candidate_model,
-                "messages": [
-                    {"role": "system", "content": "You are a deterministic professional documentation engine. Return valid JSON only."},
-                    {"role": "user", "content": prompt},
-                ],
+                "system_instruction": {
+                    "parts": [
+                        {
+                            "text": "You are a deterministic professional documentation engine. Return valid JSON only."
+                        }
+                    ]
+                },
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {"responseMimeType": "application/json"},
             }
             try:
                 r = await client.post(
                     url,
-                    headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+                    headers={
+                        "x-goog-api-key": key,
+                        "Content-Type": "application/json",
+                    },
                     json=payload,
                 )
-                if r.status_code in {429, 500, 502, 503, 504} and index < len(models) - 1:
-                    last_error = httpx.HTTPStatusError(f"Transient Gemini error {r.status_code}", request=r.request, response=r)
-                    await asyncio.sleep(0.8)
-                    continue
+
+                if r.status_code in {429, 500, 502, 503, 504}:
+                    last_error = httpx.HTTPStatusError(
+                        f"Transient Gemini error {r.status_code}",
+                        request=r.request,
+                        response=r,
+                    )
+                    if index < len(models) - 1:
+                        await asyncio.sleep(0.8)
+                        continue
+
                 r.raise_for_status()
                 data = r.json()
-                content = data["choices"][0]["message"]["content"].strip()
-                if content.startswith("\x60\x60\x60"):
-                    content = re.sub(r"^\x60\x60\x60(?:json)?\\s*|\\s*\x60\x60\x60$", "", content, flags=re.IGNORECASE).strip()
+                content = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+                if content.startswith(chr(96) * 3):
+                    content = re.sub(
+                        r"^\\x60\\x60\\x60(?:json)?\\s*|\\s*\\x60\\x60\\x60$",
+                        "",
+                        content,
+                        flags=re.IGNORECASE,
+                    ).strip()
                 parsed = json.loads(content)
                 used_model = candidate_model
                 break
+
             except httpx.HTTPStatusError as exc:
                 last_error = exc
                 if index < len(models) - 1 and exc.response.status_code in {429, 500, 502, 503, 504}:
                     await asyncio.sleep(0.8)
                     continue
                 detail = exc.response.text[:2000]
-                raise HTTPException(status_code=502, detail=f"Gemini API error: {detail}") from exc
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Gemini API error: {detail}",
+                ) from exc
+
             except (httpx.RequestError, KeyError, IndexError, json.JSONDecodeError, TypeError, ValueError) as exc:
                 last_error = exc
                 if index < len(models) - 1:
                     await asyncio.sleep(0.8)
                     continue
-                raise HTTPException(status_code=502, detail=f"Gemini response error: {type(exc).__name__}: {exc}") from exc
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Gemini response error: {type(exc).__name__}: {exc}",
+                ) from exc
 
     if parsed is None:
         raise HTTPException(status_code=502, detail=f"Gemini models unavailable: {last_error}")
@@ -278,9 +307,9 @@ Raw notes:
 async def health():
     configured = bool(
         (os.getenv("GEMINI_API_KEY") or os.getenv("LLM_API_KEY"))
-        and os.getenv("LLM_MODEL", "gemini-3.8-flash")
+        and os.getenv("LLM_MODEL", "gemini-flash-latest")
     )
-    return {"ok": True, "version": "0.1.0", "llm_configured": configured, "model": os.getenv("LLM_MODEL", "gemini-3.8-flash")}
+    return {"ok": True, "version": "0.1.0", "llm_configured": configured, "model": os.getenv("LLM_MODEL", "gemini-flash-latest")}
 
 
 @app.post("/api/structure", response_model=StructureResponse)

@@ -281,7 +281,7 @@ function goTo(path: string) { window.history.pushState({}, '', path); window.dis
 
 function hasAdaPresence(): boolean {
   const profession = localStorage.getItem(PROFESSION_KEY);
-  return (profession === 'doctor' || profession === 'lawyer') && localStorage.getItem(ONBOARDED_KEY) === 'true';
+  return profession === 'doctor' || profession === 'lawyer';
 }
 
 function PublicPage({ waitlist = false }: { waitlist?: boolean }) {

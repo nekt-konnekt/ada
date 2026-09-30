@@ -7,8 +7,10 @@ import './styles.css'
 
 type Profession = 'doctor' | 'lawyer'
 type Section = { id: string; label: string; content: string }
+type NeedInput = { id: string; question: string; section_id: string }
+type Warning = { section_id: string | null; message: string; token: string }
 type WorkspaceMode = 'quick' | 'professional'
-type DocumentState = { title: string; sections: Section[]; needs_input: string[]; provider: string }
+type DocumentState = { title: string; sections: Section[]; needs_input: NeedInput[]; warnings: Warning[]; unplaced: string[]; provider: string }
 type SavedNote = { id: string; profession: Profession; document: DocumentState; createdAt: string; updatedAt: string }
 
 const DB_NAME = 'ada-local';
@@ -138,10 +140,19 @@ function exportBaseName(document: DocumentState): string {
   return `Ada_${safeFilePart(document.title)}_${date}`
 }
 
+function normalizeDocument(document: any): DocumentState {
+  return {
+    title: String(document?.title || 'Professional Document'),
+    sections: Array.isArray(document?.sections) ? document.sections.map((section: any) => ({ id: String(section?.id || ''), label: String(section?.label || ''), content: String(section?.content || '') })) : [],
+    needs_input: Array.isArray(document?.needs_input) ? document.needs_input.map((item: any) => typeof item === 'string' ? { id: 'needs_input', question: item, section_id: '' } : { id: String(item?.id || 'needs_input'), question: String(item?.question || item?.text || ''), section_id: String(item?.section_id || '') }).filter((item: NeedInput) => item.question.trim()) : [],
+    warnings: Array.isArray(document?.warnings) ? document.warnings : [],
+    unplaced: Array.isArray(document?.unplaced) ? document.unplaced.map(String) : [],
+    provider: String(document?.provider || 'ready'),
+  }
+}
+
 function documentExportText(document: DocumentState): Array<{ label: string; content: string }> {
-  return document.sections
-    .filter(section => section.content.trim())
-    .map(section => ({ label: section.label, content: section.content.trim() }))
+  return document.sections.filter(section => section.content.trim()).map(section => ({ label: section.label, content: section.content.trim() }))
 }
 
 async function exportDocx(document: DocumentState): Promise<void> {
@@ -170,12 +181,12 @@ async function exportDocx(document: DocumentState): Promise<void> {
   if (document.needs_input.length > 0) {
     children.push(
       new Paragraph({
-        children: [new TextRun({ text: 'Needs input', bold: true })],
+        children: [new TextRun({ text: 'Needs your input', bold: true })],
         heading: HeadingLevel.HEADING_2,
         spacing: { before: 220, after: 100 },
       }),
       new Paragraph({
-        children: [new TextRun(document.needs_input.join(' · '))],
+        children: [new TextRun(document.needs_input.map(item => item.question).join(' · '))],
       }),
     )
   }
@@ -255,25 +266,31 @@ type Store = {
   setNotes: (n: string) => void
   setDocument: (d: DocumentState) => void
   editSection: (id: string, content: string) => void
+  unlockSection: (id: string) => void
+  lockedSections: Set<string>
   setFocused: (id: string | null) => void
 }
 
 const emptyDoc = (profession: Profession): DocumentState => profession === 'doctor'
   ? { title: 'Clinical Note', sections: [
       { id:'chief_complaint', label:'Chief Complaint', content:'' }, { id:'history', label:'History of Present Illness', content:'' },
-      { id:'observations', label:'Observations / Vitals', content:'' }, { id:'assessment', label:'Assessment', content:'' }, { id:'plan', label:'Plan', content:'' }
-    ], needs_input: [], provider:'ready' }
+      { id:'history_social_family', label:'Past / Social / Family History', content:'' }, { id:'allergies', label:'Allergies', content:'' },
+      { id:'observations', label:'Observations / Vitals', content:'' }, { id:'examination', label:'Examination Findings', content:'' },
+      { id:'investigations', label:'Investigations', content:'' }, { id:'assessment', label:'Assessment', content:'' },
+      { id:'plan', label:'Plan', content:'' }, { id:'follow_up', label:'Follow-up', content:'' }
+    ], needs_input: [], warnings: [], unplaced: [], provider:'ready' }
   : { title: 'Case Note', sections: [
       { id:'parties', label:'Parties', content:'' }, { id:'facts', label:'Facts / Incident Summary', content:'' },
       { id:'injuries', label:'Injuries / Damages', content:'' }, { id:'liability', label:'Liability / Issues', content:'' },
       { id:'authorities', label:'Authorities', content:'' }, { id:'evidence', label:'Supporting Information', content:'' }, { id:'next_steps', label:'Next Steps', content:'' }
-    ], needs_input: [], provider:'ready' }
+    ], needs_input: [], warnings: [], unplaced: [], provider:'ready' }
 
 const useAda = create<Store>((set) => ({
-  profession: 'doctor', notes: '', document: emptyDoc('doctor'), focusedSection: null,
-  setProfession: (profession) => set({ profession, document: emptyDoc(profession) }),
-  setNotes: (notes) => set({ notes }), setDocument: (document) => set({ document }),
-  editSection: (id, content) => set(s => ({ document: { ...s.document, sections: s.document.sections.map(x => x.id === id ? {...x, content} : x) }})),
+  profession: 'doctor', notes: '', document: emptyDoc('doctor'), focusedSection: null, lockedSections: new Set(),
+  setProfession: (profession) => set({ profession, document: emptyDoc(profession), lockedSections: new Set() }),
+  setNotes: (notes) => set({ notes }), setDocument: (document) => set({ document: normalizeDocument(document) }),
+  editSection: (id, content) => set(s => { const locked = new Set(s.lockedSections); locked.add(id); return { lockedSections: locked, document: { ...s.document, sections: s.document.sections.map(x => x.id === id ? {...x, content} : x) } } }),
+  unlockSection: (id) => set(s => { const locked = new Set(s.lockedSections); locked.delete(id); return { lockedSections: locked } }),
   setFocused: (focusedSection) => set({ focusedSection })
 }))
 
@@ -329,9 +346,9 @@ function PublicPage({ waitlist = false }: { waitlist?: boolean }) {
 }
 
 function App() {
-  const { profession, notes, document, focusedSection } = useAda()
+  const { profession, notes, document, focusedSection, lockedSections } = useAda()
   const setNotes = useAda(s=>s.setNotes), setProfession=useAda(s=>s.setProfession), setDocument=useAda(s=>s.setDocument)
-  const setFocused=useAda(s=>s.setFocused), editSection=useAda(s=>s.editSection)
+  const setFocused=useAda(s=>s.setFocused), editSection=useAda(s=>s.editSection), unlockSection=useAda(s=>s.unlockSection)
   const [status, setStatus] = useState('Ready')
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>('professional')
   const [professionLocked, setProfessionLocked] = useState<Profession | null>(null)
@@ -355,8 +372,8 @@ function App() {
       if (draft) {
         const parsed = JSON.parse(draft) as { profession: Profession; document: DocumentState }
         if (parsed.document) {
-          useAda.setState({ profession: parsed.profession, notes: '', document: parsed.document })
-          localStorage.setItem('ada-current-draft', JSON.stringify({ profession: parsed.profession, document: parsed.document }))
+          useAda.setState({ profession: parsed.profession, notes: '', document: normalizeDocument(parsed.document), lockedSections: new Set() })
+          localStorage.setItem('ada-current-draft', JSON.stringify({ profession: parsed.profession, document: normalizeDocument(parsed.document) }))
           setStatus('Structured document restored from this device')
         }
       }
@@ -419,7 +436,7 @@ function App() {
   }
 
   function openSaved(note: SavedNote) {
-    useAda.setState({ profession: note.profession, notes: '', document: note.document, focusedSection: null })
+    useAda.setState({ profession: note.profession, notes: '', document: normalizeDocument(note.document), focusedSection: null, lockedSections: new Set() })
     setHistoryOpen(false)
     setStatus('Opened from this device')
   }
@@ -430,9 +447,19 @@ function App() {
   }
 
   useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      window.document.querySelectorAll<HTMLTextAreaElement>('.doc-section textarea').forEach(area => {
+        area.style.height = 'auto'
+        area.style.height = area.scrollHeight + 'px'
+      })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [document.sections])
+
+  useEffect(() => {
     window.clearTimeout(timer.current)
     if (!notes.trim() || workspaceMode === 'quick') {
-      if (!notes.trim() && workspaceMode === 'professional') setDocument(emptyDoc(profession))
+      if (!notes.trim() && workspaceMode === 'professional') { setDocument(emptyDoc(profession)); useAda.setState({ lockedSections: new Set() }) }
       if (!notes.trim()) setStatus('Ready')
       return
     }
@@ -448,8 +475,10 @@ function App() {
           } catch {}
           throw new Error(detail)
         }
-        const next = await r.json() as DocumentState & { profession: Profession }
-        setDocument(next); setStatus(next.provider === 'local-demo' ? 'Local demo engine' : `Live: ${next.provider}`)
+        const next = normalizeDocument(await r.json())
+        const current = useAda.getState()
+        const merged = { ...next, sections: next.sections.map(section => { const currentSection = current.document.sections.find(item => item.id === section.id); return current.lockedSections.has(section.id) && currentSection ? currentSection : section }) }
+        setDocument(merged); setStatus(next.provider === 'local-demo' ? 'Local demo engine' : 'Live: ' + next.provider)
       } catch (e) {
         if ((e as Error).name !== 'AbortError') setStatus('Could not update: ' + (e as Error).message)
       }
@@ -469,13 +498,13 @@ function App() {
         <button className={workspaceMode==='quick' ? 'active' : ''} onClick={()=>{setWorkspaceMode('quick');setStatus(notes.trim()?'Quick note':'Ready')}}>Quick Note</button>
         <button className={workspaceMode==='professional' ? 'active' : ''} onClick={()=>{setWorkspaceMode('professional');setStatus(notes.trim()?'Updating…':'Ready')}}>Professional Document</button>
       </div>
-      <span className="locked-mode">{profession==='doctor' ? 'Doctor' : 'Lawyer'} · locked</span>
+      <span className="locked-mode">{professionLocked === null ? 'Clinical mode (preview)' : (profession==='doctor' ? 'Doctor' : 'Lawyer') + ' · locked'}</span>
       <button className="waitlist-button" onClick={()=>goTo("/waitlist")}>Waitlist</button>
       <div className="status"><i></i>{status}</div>
     </header>
     <section className="workspace" style={{gridTemplateColumns:`${split}% 8px ${100-split}%`}}>
       <section className="pane notes-pane">
-        <div className="pane-head"><div><span className="eyebrow">01 · YOUR NOTES</span><h2>Write however you think.</h2></div><div className="head-actions"><span className="hint">{notes.length.toLocaleString()} chars</span><button className="history-button" onClick={()=>setHistoryOpen(true)}>History{history.length ? <b>{history.length}</b> : null}</button></div></div>
+        <div className="pane-head"><div><span className="eyebrow">01 · YOUR NOTES</span><h2 className="notes-heading">Write however you think.</h2></div><div className="head-actions"><span className="hint">{notes.length.toLocaleString()} chars</span><button className="history-button" onClick={()=>setHistoryOpen(true)}>History{history.length ? <b>{history.length}</b> : null}</button></div></div>
         <textarea autoFocus value={notes} onChange={e=>setNotes(e.target.value)} placeholder={profession==='doctor' ? 'Start scribbling…\n\npatient came in complaining of chest pain since yesterday…' : 'Start scribbling…\n\nclient was driving home when the other vehicle…'} />
         <div className="note-foot"><span>Anything goes. Ada will organize what is actually present.</span><div className="note-actions"><button className="menu-button" aria-label="Note actions" title="Note actions" aria-expanded={actionsOpen} onClick={()=>setActionsOpen(value=>!value)}><span className="hamburger-icon" aria-hidden="true"><i></i><i></i><i></i></span></button>{actionsOpen && <div className="actions-menu"><input ref={fileInput} className="scan-input" type="file" accept="image/*" capture="environment" onChange={e=>{const file=e.target.files?.[0]; if(file) { void handleScan(file); setActionsOpen(false) }}} /><button className="menu-item" onClick={()=>fileInput.current?.click()}>{scanState}</button><button className="menu-item menu-save" onClick={()=>{void handleSave(); setActionsOpen(false)}}>{saveState}</button><button className="menu-item" disabled={workspaceMode !== 'professional' || exportState !== 'idle'} onClick={async()=>{setExportState('docx'); setStatus('Preparing DOCX…'); try { await exportDocx(document); setStatus('DOCX saved to device') } catch (e) { setStatus('DOCX export failed: ' + (e as Error).message) } finally { setExportState('idle'); setActionsOpen(false) }}}>{exportState === 'docx' ? 'Preparing…' : 'Save as DOCX'}</button><button className="menu-item" disabled={workspaceMode !== 'professional' || exportState !== 'idle'} onClick={()=>{setExportState('pdf'); setStatus('Preparing PDF…'); try { exportPdf(document); setStatus('PDF saved to device') } catch (e) { setStatus('PDF export failed: ' + (e as Error).message) } finally { setExportState('idle'); setActionsOpen(false) }}}>{exportState === 'pdf' ? 'Preparing…' : 'Save as PDF'}</button><button className="menu-item" onClick={()=>{setNotes(''); setActionsOpen(false)}}>Clear</button></div>}</div></div>
       </section>
@@ -486,18 +515,21 @@ function App() {
         {workspaceMode==='quick' ? <article className="document quick-output"><div className="doc-title">Quick Note</div><div className="doc-rule"></div><textarea value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Your note will appear here." /><small>Plain output · no professional structure applied</small></article> : <article className="document">
           <div className="doc-title">{document.title}</div>
           <div className="doc-rule"></div>
-          {document.sections.map(section => <section className="doc-section" key={section.id}>
-            <label>{section.label}</label>
-            <textarea value={section.content} onFocus={()=>setFocused(section.id)} onBlur={()=>setFocused(null)} onChange={e=>editSection(section.id,e.target.value)} placeholder="No information provided." />
-            {focusedSection===section.id && <small>Editing · your changes are protected while focused</small>}
-          </section>)}
+          {document.sections.map(section => {
+            const fieldWarnings = document.warnings.filter(warning => warning.section_id === section.id)
+            const isLocked = lockedSections.has(section.id)
+            return <section className={"doc-section " + (!section.content.trim() ? "is-empty" : "")} key={section.id}>
+              <div className="field-head"><label>{section.label}</label><div className="field-meta">{fieldWarnings.map(warning => <span className="field-warning" key={warning.message}>{warning.message}</span>)}{isLocked ? <button type="button" className="field-lock" onClick={()=>unlockSection(section.id)} title="Unlock this field" aria-label={"Unlock " + section.label}>Locked · unlock</button> : !section.content.trim() ? <span className="field-empty-state">Empty</span> : null}</div></div>
+              <textarea value={section.content} onFocus={()=>setFocused(section.id)} onBlur={()=>setFocused(null)} onChange={e=>{editSection(section.id,e.target.value); e.currentTarget.style.height='auto'; e.currentTarget.style.height=e.currentTarget.scrollHeight+'px'}} onInput={e=>{e.currentTarget.style.height='auto'; e.currentTarget.style.height=e.currentTarget.scrollHeight+'px'}} placeholder="Empty field" />
+              {focusedSection===section.id && !isLocked && <small>Editing · changes lock this field against later AI updates</small>}
+            </section>
+          })}
         </article>}
+          {workspaceMode==='professional' && document.unplaced.length > 0 && <div className="unplaced"><strong>Unplaced from your notes</strong>{document.unplaced.map((item, index)=><span key={index}>{item}</span>)}</div>}
+          {workspaceMode==='professional' && document.warnings.length > 0 && <div className="warnings-summary"><strong>Review warnings</strong>{document.warnings.map((warning,index)=><span key={index}>{warning.message}</span>)}</div>}
       </section>
     </section>
     <footer><span>ada.            2026.            made with ❤️ in 🇳🇬.</span></footer>
-    {professionLocked === null && <div className="lock-backdrop">
-      <section className="lock-card"><span className="eyebrow">ADA PROFESSIONAL WORKSPACE</span><h2>Choose your profession.</h2><p>Ada locks each workspace to one professional role. You cannot switch between Doctor and Lawyer inside the workspace.</p><div className="lock-options"><button onClick={()=>chooseProfession('doctor')}><strong>Doctor</strong><span>Clinical documentation</span></button><button onClick={()=>chooseProfession('lawyer')}><strong>Lawyer</strong><span>Legal case documentation</span></button></div></section>
-    </div>}
     {historyOpen && <div className="history-backdrop" onClick={()=>setHistoryOpen(false)}>
       <aside className="history-panel" onClick={e=>e.stopPropagation()}>
         <div className="history-head"><div><span className="eyebrow">LOCAL STORAGE</span><h2>History</h2><p>Structured documents stay on this device.</p></div><button className="close-button" onClick={()=>setHistoryOpen(false)}>×</button></div>

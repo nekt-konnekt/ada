@@ -16,11 +16,7 @@ type SavedNote = { id: string; profession: Profession; document: DocumentState; 
 const DB_NAME = 'ada-local';
 const DB_VERSION = 2;
 const STORE_NAME = 'notes';
-const ADA_SUPABASE_URL = 'https://husahdwqvoboguaceerd.supabase.co';
-const ADA_SUPABASE_KEY = 'sb_publishable_hxSlGSUqfrpQzunQ66m3EQ_PecORFor';
 const PROFESSION_KEY = 'ada-profession';
-const TERMS_VERSION = '1.0';
-const PRIVACY_VERSION = '1.0';
 const ONBOARDED_KEY = 'ada-onboarded';
 
 function openNotesDb(): Promise<IDBDatabase> {
@@ -83,27 +79,6 @@ async function deleteLocalNote(id: string): Promise<void> {
     tx.oncomplete = () => { db.close(); resolve(); };
     tx.onerror = () => { db.close(); reject(tx.error); };
   });
-}
-async function joinWaitlist(name: string, email: string, phone: string, profession: Profession, agreement: { termsVersion: string; termsAcceptedAt: string; privacyVersion: string; privacyAcknowledgedAt: string; professionalAcknowledgedAt: string }): Promise<void> {
-  const response = await fetch(ADA_SUPABASE_URL + '/rest/v1/waitlist', {
-    method: 'POST', headers: { apikey: ADA_SUPABASE_KEY, Authorization: 'Bearer ' + ADA_SUPABASE_KEY, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
-    body: JSON.stringify({ name: name.trim(), email: email.trim().toLowerCase(), phone: phone.trim(), profession, terms_version: agreement.termsVersion, terms_accepted_at: agreement.termsAcceptedAt, privacy_version: agreement.privacyVersion, privacy_acknowledged_at: agreement.privacyAcknowledgedAt, professional_acknowledged_at: agreement.professionalAcknowledgedAt }),
-  });
-  if (!response.ok && response.status !== 409) throw new Error('Could not join the waitlist');
-}
-
-async function saveRawNoteToAda(profession: Profession, notes: string): Promise<void> {
-  const response = await fetch(`${ADA_SUPABASE_URL}/rest/v1/raw_notes`, {
-    method: 'POST',
-    headers: {
-      apikey: ADA_SUPABASE_KEY,
-      Authorization: `Bearer ${ADA_SUPABASE_KEY}`,
-      'Content-Type': 'application/json',
-      Prefer: 'return=minimal',
-    },
-    body: JSON.stringify({ id: crypto.randomUUID(), profession, notes }),
-  });
-  if (!response.ok) throw new Error('Ada could not store the raw note');
 }
 
 let paddleOcrPromise: Promise<any> | null = null;
@@ -358,50 +333,20 @@ function hasAdaPresence(): boolean {
   return profession === 'doctor' || profession === 'lawyer';
 }
 
-function PublicPage({ waitlist = false }: { waitlist?: boolean }) {
-  useEffect(() => {
-    if (waitlist && hasAdaPresence()) goTo('/0.1');
-  }, [waitlist])
-  const [name, setName] = useState('')
-  const [email, setEmail] = useState('')
-  const [phone, setPhone] = useState('')
-  const [profession, setProfession] = useState<Profession>('doctor')
-  const [termsAccepted, setTermsAccepted] = useState(false)
-  const [privacyAcknowledged, setPrivacyAcknowledged] = useState(false)
-  const [professionalAcknowledged, setProfessionalAcknowledged] = useState(false)
-  const [state, setState] = useState('Join waitlist')
-  async function submit() {
-    if (!name.trim()) return setState('Enter name')
-    if (!email.trim()) return setState('Enter email')
-    if (!phone.trim()) return setState('Enter phone')
-    if (!termsAccepted) return setState('Accept the user agreement')
-    if (!privacyAcknowledged) return setState('Acknowledge the privacy notice')
-    if (!professionalAcknowledged) return setState('Acknowledge professional responsibility')
-    setState('Joining…')
-    try {
-      const acceptedAt = new Date().toISOString()
-      await joinWaitlist(name, email, phone, profession, { termsVersion: TERMS_VERSION, termsAcceptedAt: acceptedAt, privacyVersion: PRIVACY_VERSION, privacyAcknowledgedAt: acceptedAt, professionalAcknowledgedAt: acceptedAt })
-      if (new URLSearchParams(window.location.search).get('from') === 'try') {
-        localStorage.setItem('ada-profession', profession)
-        localStorage.setItem(ONBOARDED_KEY, 'true')
-        goTo('/0.1')
-        return
-      }
-      setState('You’re on the list')
-      setName('')
-      setEmail('')
-      setPhone('')
-      setTermsAccepted(false)
-      setPrivacyAcknowledged(false)
-      setProfessionalAcknowledged(false)
-    }
-    catch { setState('Could not join') }
-    window.setTimeout(() => setState('Join waitlist'), 2200)
-  }
-  if (waitlist) return <main className="public-page"><header className="public-top"><button className="public-brand" onClick={()=>goTo('/')}><strong>ada</strong><span>write naturally. structure professionally.</span></button></header><section className="public-content"><span className="eyebrow">EARLY ACCESS</span><h1>Join the early-access list</h1><p>Ada is being built for doctors and lawyers who want to turn rough notes into structured professional documents without stopping to format everything themselves.</p><div className="public-form"><label>Full name<input className="waitlist-input" value={name} onChange={e=>setName(e.target.value)} placeholder="Your name" autoComplete="name" /></label><label>Email<input className="waitlist-input" type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@example.com" autoComplete="email" /></label><label>Phone number<input className="waitlist-input" type="tel" value={phone} onChange={e=>setPhone(e.target.value)} placeholder="+234 801 234 5678" autoComplete="tel" /></label><div className="public-role"><span>Profession</span><div><button className={profession==='doctor'?'selected':''} onClick={()=>setProfession('doctor')}>Doctor</button><button className={profession==='lawyer'?'selected':''} onClick={()=>setProfession('lawyer')}>Lawyer</button></div></div><div className="agreement-box"><span className="agreement-title">Before you continue</span><label className="agreement-check"><input type="checkbox" checked={termsAccepted} onChange={e=>setTermsAccepted(e.target.checked)} /><span>I agree to the Ada user agreement (v1.0), including the rules for using Ada as a documentation aid.</span></label><label className="agreement-check"><input type="checkbox" checked={privacyAcknowledged} onChange={e=>setPrivacyAcknowledged(e.target.checked)} /><span>I acknowledge the Privacy Notice (v1.0) and understand that information I submit may be processed to provide Ada.</span></label><label className="agreement-check"><input type="checkbox" checked={professionalAcknowledged} onChange={e=>setProfessionalAcknowledged(e.target.checked)} /><span>I understand that I remain responsible for reviewing, correcting, and approving professional documents before relying on them.</span></label><small className="agreement-note">Ada structures information you provide. It does not replace professional judgment.</small></div><button className="waitlist-submit" onClick={submit}>{state}</button></div><div className="public-next"><strong>What happens next</strong><p>We'll contact you when Ada is ready for your professional workspace.</p></div><small className="privacy-note">No spam. Early access updates only.</small></section><footer><span>ada.            2026.            made with ❤️ in 🇳🇬.</span></footer></main>
-  return <main className="public-page"><header className="public-top"><div className="public-brand"><strong>ada</strong><span>write naturally. structure professionally.</span></div></header><section className="public-content"><span className="eyebrow">ADA EARLY ACCESS</span><h1>Write like you think. Document like a pro.</h1><p>Ada lets you scribble freely while you work, then structures what is actually there into a professional document when you need it.</p><section className="public-problems"><span className="eyebrow">THE PROBLEM</span><h2>Your notes don't arrive in professional structure.</h2><div className="public-problem-grid"><article><span className="eyebrow">FOR DOCTORS</span><h3>A patient talks. You observe. You remember.</h3><p>Symptoms, observations, medications and follow-up details come in as the consultation happens. The work of putting them into a proper clinical note comes afterwards.</p></article><article><span className="eyebrow">FOR LAWYERS</span><h3>A client tells you what happened. You collect the pieces.</h3><p>Names, dates, events, allegations, documents and things to verify rarely arrive in the order your case note needs. Structuring them is a separate job.</p></article></div><p className="public-problem-close">Other tools force you into rigid forms while you're talking to patients or clients. Ada lets you scribble freely, then structures it after. Paper notes, digital chaos, one workflow.</p></section><div className="public-actions"><article><span className="eyebrow">ADA 0.1</span><h2>{hasAdaPresence() ? 'Continue with Ada' : 'Try Ada 0.1'}</h2><p>{hasAdaPresence() ? 'Your Ada workspace is ready. Continue where you left off.' : 'The first working version of Ada is available to try now.'}</p><button onClick={()=>goTo(hasAdaPresence() ? '/0.1' : '/waitlist?from=try')}>{hasAdaPresence() ? 'Open Ada' : 'Try Ada'}</button></article><article><span className="eyebrow">EARLY ACCESS</span><h2>Join the early-access list</h2><p>Get notified as Ada opens up to more professionals.</p><button onClick={()=>goTo('/waitlist')}>Join waitlist</button></article></div></section><footer><span>ada.            2026.            made with ❤️ in 🇳🇬.</span></footer></main>
+function PublicPage() {
+  const start = () => { if (!localStorage.getItem(PROFESSION_KEY)) localStorage.setItem(PROFESSION_KEY, 'doctor'); localStorage.setItem(ONBOARDED_KEY, 'true'); goTo('/0.1') }
+  return <main className="public-page ada-home">
+    <header className="public-top"><button className="public-brand" onClick={()=>goTo('/')}><strong>ada</strong><span>write naturally. structure professionally.</span></button><nav className="home-nav"><a href="#how-it-works">How it works</a><a href="#professionals">For professionals</a><a href="#pricing">Pricing</a><button onClick={start}>Open Ada ↗</button></nav></header>
+    <section className="home-hero"><div className="hero-copy"><span className="eyebrow">DOCUMENTATION WITHOUT THE INTERRUPTION</span><h1>Be present with your client. <em>Let Ada handle the record.</em></h1><p>The dual-pane workspace for doctors and lawyers. Scribble freely, upload rough documents, or scan handwritten notes in the left pane. Turn raw input into structured professional documentation in the right pane.</p><div className="hero-actions"><button className="home-primary" onClick={start}>Start documenting free <span>→</span></button><a href="#how-it-works">See how it works ↓</a></div><div className="hero-proof"><span>✳ Free-form capture</span><span>◉ Local browser history</span><span>⌁ Editable output</span></div></div>
+    <div className="hero-product"><div className="product-topline"><span><i/> ADA WORKSPACE</span><span>STRUCTURED DRAFT</span></div><div className="product-split"><div className="product-input"><small>01 / CAPTURE</small><b>Consultation notes</b><p>Patient reports recurring headaches for 3 weeks. Worse in the morning. No known allergies. BP 128/82. Review medication history and schedule follow-up.</p><div className="scribble-lines">••• rough notes<br/>••• observations<br/>••• next steps</div></div><div className="product-output"><small>02 / STRUCTURED RECORD</small><b>Clinical Note</b><label>CHIEF COMPLAINT</label><p>Recurring headaches for three weeks.</p><label>OBSERVATIONS</label><p>Blood pressure: 128/82 mmHg.</p><label>PLAN</label><p>Review medication history. Arrange follow-up.</p><span className="review-tag">Review and approve before use</span></div></div><div className="product-bottom"><span>Editable draft</span><span>Local history · Export-ready</span></div></div></section>
+    <section className="home-problem"><div><span className="eyebrow">THE DOCUMENTATION GAP</span><h2>The conversation ends. The paperwork doesn't.</h2></div><div className="problem-columns"><article><span>01 / THE REALITY</span><h3>You can’t fill out a form while listening.</h3><p>When a patient describes complex symptoms or a client recounts a timeline, your brain is in analysis mode, not data-entry mode. Rigid fields interrupt focus and rapport.</p></article><article><span>02 / THE AFTER-HOURS TAX</span><h3>Then the reconstruction starts after the appointment.</h3><p>You scribble on paper, photograph referrals, or type chaotic fragments. Later, you reconstruct them into SOAP notes or case memos. That is time pulled away from rest and the work that matters.</p></article></div></section>
+    <section className="home-how" id="how-it-works"><div className="section-intro"><span className="eyebrow">A TWO-PANE WORKFLOW</span><h2>Two panes. One workflow. Less friction.</h2><p>Capture first. Organize second. Stay with the person in front of you.</p></div><div className="how-grid"><article><span className="step-number">01</span><h3>The Capture Zone</h3><p>Type quickly, scribble, or add a document. Bring in handwritten referrals, rough clauses, and existing PDFs. Focus on getting the facts down, not polishing the format.</p><ul><li>Free-form typing and handwriting</li><li>Image and document input</li><li>Capture details in your own order</li></ul></article><article><span className="step-number">02</span><h3>The Structured Record</h3><p>Ada organizes supported input into a professional draft. Review sections, correct details, and export when ready.</p><ul><li>Clinical and case-oriented structure</li><li>Editable sections and review prompts</li><li>Document export workflows</li></ul></article></div><div className="video-placeholder"><div className="play-mark">▶</div><span>WORKFLOW PREVIEW</span><p>See rough notes become a structured document</p><small>Product walkthrough video can be embedded here.</small></div></section>
+    <section className="home-professions" id="professionals"><div className="section-intro"><span className="eyebrow">BUILT FOR HIGH-STAKES PROFESSIONALS</span><h2>Different disciplines. One documentation problem.</h2></div><div className="profession-grid"><article><div className="profession-icon">＋</div><span className="eyebrow">FOR DOCTORS</span><h3>From chaos to SOAP notes.</h3><p>Shape consultation notes and scanned referrals into structured clinical summaries, discharge drafts, and referral letters.</p><div className="benefit"><b>Clinical workflow support</b><span>SOAP-oriented structure, editable drafts, and local browser history.</span></div><button onClick={start}>Open Ada for Doctors →</button></article><article><div className="profession-icon">§</div><span className="eyebrow">FOR LAWYERS</span><h3>From intake to case memo.</h3><p>Capture a client’s narrative, organize dates and facts, and shape rough material into case briefs, engagement drafts, and time-recording notes.</p><div className="benefit"><b>Case-focused organization</b><span>Structured notes, editable records, and export workflows.</span></div><button onClick={start}>Open Ada for Lawyers →</button></article></div></section>
+    <section className="home-trust"><div><span className="eyebrow">YOUR NOTES, YOUR DEVICE</span><h2>Local-first workspace. Clear data boundaries.</h2><p>Saved document history is stored in your browser on this device. Submitted content is sent to the configured AI processing service to generate a response. Do not enter identifiable or confidential information until the provider's processing and retention terms have been reviewed. Ada does not need a server-side notes database for local history.</p></div><div className="trust-points"><article><b>Browser-based history</b><span>Saved records stay in local browser storage unless you export them.</span></article><article><b>Review before relying</b><span>Ada assists with structure. Professionals remain responsible for verification, decisions, and approval.</span></article><article><b>Privacy claims grounded in implementation</b><span>AI provider processing, retention, and applicable compliance status should be verified before sensitive use.</span></article></div></section>
+    <section className="home-pricing" id="pricing"><div className="section-intro"><span className="eyebrow">SIMPLE PRICING</span><h2>An investment that can pay for itself in one saved hour.</h2><p>Start with Lite. Upgrade when Ada becomes part of your daily workflow.</p></div><div className="pricing-grid"><article><span className="eyebrow">ADA LITE</span><h3>$0 <small>/ month</small></h3><p>For trying the workflow.</p><ul><li>Dual-pane workspace</li><li>10 AI generations per month</li><li>Local browser history</li><li>Basic text export</li></ul><button onClick={start}>Start free</button></article><article className="pricing-pro"><span className="eyebrow">ADA PROFESSIONAL</span><h3>$19 <small>/ ₦28,000 per month</small></h3><p>Or $190 / ₦280,000 yearly.</p><ul><li>Everything in Lite</li><li>Unlimited generations and scans</li><li>Professional templates</li><li>PDF, Word, and rich-text export</li><li>Priority founder support</li></ul><button onClick={start}>Start with Ada</button><small className="pricing-note">Plan limits and billing availability should be confirmed before checkout.</small></article></div><div className="roi-copy"><h3>Why pay for Ada?</h3><p>Your subscription supports AI compute and continued development of profession-specific templates. If Ada saves even 15 minutes of documentation time each week, that time can compound across your working year.</p><p><strong>Professional trial:</strong> A 14-day trial with no card required is intended as the offer. Enable trial and billing controls before presenting it as active.</p></div></section>
+    <section className="home-final"><span className="eyebrow">CLOSE THE DAY WITH YOUR WORK DONE</span><h2>Reclaim your evening hours.</h2><p>Stay present in the conversation. Let Ada help shape the record.</p><button onClick={start}>Start documenting now →</button></section><footer><span>ada. &nbsp; 2026. &nbsp; Made with ❤️ in 🇳🇬.</span><span>Documentation support, not a substitute for professional judgment.</span></footer>
+  </main>
 }
-
 function App() {
   const { profession, notes, document, focusedSection, lockedSections } = useAda()
   const setNotes = useAda(s=>s.setNotes), setProfession=useAda(s=>s.setProfession), setDocument=useAda(s=>s.setDocument)
@@ -588,7 +533,6 @@ function App() {
       createdAt: now, updatedAt: now
     }
     try {
-      await saveRawNoteToAda(profession, notes)
       await saveLocalNote(saved)
       const next = await listLocalNotes()
       setHistory(next)
@@ -730,6 +674,6 @@ function App() {
   </main>
 }
 
-function Root() { const [path, setPath] = useState(window.location.pathname); useEffect(() => { const onPop = () => setPath(window.location.pathname); window.addEventListener('popstate', onPop); return () => window.removeEventListener('popstate', onPop) }, []); if (path === '/0.1') return <App />; if (path === '/waitlist') return <PublicPage waitlist />; return <PublicPage /> }
+function Root() { const [path, setPath] = useState(window.location.pathname); useEffect(() => { const onPop = () => setPath(window.location.pathname); window.addEventListener('popstate', onPop); return () => window.removeEventListener('popstate', onPop) }, []); if (path === '/0.1') return <App />; return <PublicPage /> }
 
 createRoot(document.getElementById('root')!).render(<React.StrictMode><Root/></React.StrictMode>)

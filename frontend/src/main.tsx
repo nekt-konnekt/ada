@@ -155,6 +155,62 @@ function normalizeDocument(document: any): DocumentState {
 function documentExportText(document: DocumentState): Array<{ label: string; content: string }> {
   return document.sections.filter(section => section.content.trim()).map(section => ({ label: section.label, content: section.content.trim() }))
 }
+function escapeHtml(value: string): string {
+  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;')
+}
+
+function inlineRichText(value: string): string {
+  return escapeHtml(value).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/__(.+?)__/g, '<strong>$1</strong>')
+}
+
+function formatClipboardContent(document: DocumentState): { html: string; text: string } {
+  const parts: string[] = ['<div style="font-family:Arial,sans-serif;line-height:1.5">', '<p><strong>' + escapeHtml(document.title) + '</strong></p>']
+  const textParts: string[] = [document.title]
+  for (const section of documentExportText(document)) {
+    parts.push('<p><strong>' + escapeHtml(section.label) + '</strong></p>')
+    textParts.push('', section.label)
+    const lines = section.content.split(/\r?\n/)
+    let listType: 'ul' | 'ol' | null = null
+    let listItems: string[] = []
+    const flushList = () => {
+      if (!listType || listItems.length === 0) return
+      parts.push('<' + listType + '>' + listItems.map(item => '<li>' + inlineRichText(item) + '</li>').join('') + '</' + listType + '>')
+      listType = null
+      listItems = []
+    }
+    for (const line of lines) {
+      const bullet = line.match(/^\s*[-*•]\s+(.+)$/)
+      const numbered = line.match(/^\s*\d+[.)]\s+(.+)$/)
+      if (bullet || numbered) {
+        const nextType = bullet ? 'ul' : 'ol'
+        if (listType && listType !== nextType) flushList()
+        listType = nextType
+        listItems.push((bullet || numbered)![1])
+        continue
+      }
+      flushList()
+      if (line.trim()) { parts.push('<p>' + inlineRichText(line) + '</p>'); textParts.push(line) } else textParts.push('')
+    }
+    flushList()
+  }
+  if (document.needs_input.length > 0) {
+    parts.push('<p><strong>Needs your input</strong></p><ul>' + document.needs_input.map(item => '<li>' + inlineRichText(item.question) + '</li>').join('') + '</ul>')
+    textParts.push('', 'Needs your input', ...document.needs_input.map(item => '• ' + item.question))
+  }
+  parts.push('</div>')
+  return { html: parts.join(''), text: textParts.join('\n') }
+}
+
+async function copyDocumentToClipboard(document: DocumentState): Promise<void> {
+  const formatted = formatClipboardContent(document)
+  if (navigator.clipboard?.write && typeof ClipboardItem !== 'undefined') {
+    const item = new ClipboardItem({ 'text/html': new Blob([formatted.html], { type: 'text/html' }), 'text/plain': new Blob([formatted.text], { type: 'text/plain' }) })
+    await navigator.clipboard.write([item])
+    return
+  }
+  if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(formatted.text); return }
+  throw new Error('Clipboard access is unavailable')
+}
 
 async function exportDocx(document: DocumentState): Promise<void> {
   const children: Paragraph[] = [
@@ -343,7 +399,7 @@ function PublicPage({ waitlist = false }: { waitlist?: boolean }) {
     window.setTimeout(() => setState('Join waitlist'), 2200)
   }
   if (waitlist) return <main className="public-page"><header className="public-top"><button className="public-brand" onClick={()=>goTo('/')}><strong>ada</strong><span>write naturally. structure professionally.</span></button></header><section className="public-content"><span className="eyebrow">EARLY ACCESS</span><h1>Join the early-access list</h1><p>Ada is being built for doctors and lawyers who want to turn rough notes into structured professional documents without stopping to format everything themselves.</p><div className="public-form"><label>Full name<input className="waitlist-input" value={name} onChange={e=>setName(e.target.value)} placeholder="Your name" autoComplete="name" /></label><label>Email<input className="waitlist-input" type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@example.com" autoComplete="email" /></label><label>Phone number<input className="waitlist-input" type="tel" value={phone} onChange={e=>setPhone(e.target.value)} placeholder="+234 801 234 5678" autoComplete="tel" /></label><div className="public-role"><span>Profession</span><div><button className={profession==='doctor'?'selected':''} onClick={()=>setProfession('doctor')}>Doctor</button><button className={profession==='lawyer'?'selected':''} onClick={()=>setProfession('lawyer')}>Lawyer</button></div></div><div className="agreement-box"><span className="agreement-title">Before you continue</span><label className="agreement-check"><input type="checkbox" checked={termsAccepted} onChange={e=>setTermsAccepted(e.target.checked)} /><span>I agree to the Ada user agreement (v1.0), including the rules for using Ada as a documentation aid.</span></label><label className="agreement-check"><input type="checkbox" checked={privacyAcknowledged} onChange={e=>setPrivacyAcknowledged(e.target.checked)} /><span>I acknowledge the Privacy Notice (v1.0) and understand that information I submit may be processed to provide Ada.</span></label><label className="agreement-check"><input type="checkbox" checked={professionalAcknowledged} onChange={e=>setProfessionalAcknowledged(e.target.checked)} /><span>I understand that I remain responsible for reviewing, correcting, and approving professional documents before relying on them.</span></label><small className="agreement-note">Ada structures information you provide. It does not replace professional judgment.</small></div><button className="waitlist-submit" onClick={submit}>{state}</button></div><div className="public-next"><strong>What happens next</strong><p>We'll contact you when Ada is ready for your professional workspace.</p></div><small className="privacy-note">No spam. Early access updates only.</small></section><footer><span>ada.            2026.            made with ❤️ in 🇳🇬.</span></footer></main>
-  return <main className="public-page"><header className="public-top"><div className="public-brand"><strong>ada</strong><span>write naturally. structure professionally.</span></div></header><section className="public-content"><span className="eyebrow">ADA EARLY ACCESS</span><h1>Professional notes, structured as you work.</h1><p>Ada is being built for doctors and lawyers who want to turn rough notes into structured professional documents without stopping to format everything themselves.</p><section className="public-problems"><span className="eyebrow">THE PROBLEM</span><h2>Your notes don't arrive in professional structure.</h2><div className="public-problem-grid"><article><span className="eyebrow">FOR DOCTORS</span><h3>A patient talks. You observe. You remember.</h3><p>Symptoms, observations, medications and follow-up details come in as the consultation happens. The work of putting them into a proper clinical note comes afterwards.</p></article><article><span className="eyebrow">FOR LAWYERS</span><h3>A client tells you what happened. You collect the pieces.</h3><p>Names, dates, events, allegations, documents and things to verify rarely arrive in the order your case note needs. Structuring them is a separate job.</p></article></div><p className="public-problem-close">Ada lets you scribble naturally. When the work needs a professional document, Ada structures what is actually there and leaves you in control.</p></section><div className="public-actions"><article><span className="eyebrow">ADA 0.1</span><h2>{hasAdaPresence() ? 'Continue with Ada' : 'Try Ada 0.1'}</h2><p>{hasAdaPresence() ? 'Your Ada workspace is ready. Continue where you left off.' : 'The first working version of Ada is available to try now.'}</p><button onClick={()=>goTo(hasAdaPresence() ? '/0.1' : '/waitlist?from=try')}>{hasAdaPresence() ? 'Open Ada' : 'Try Ada'}</button></article><article><span className="eyebrow">EARLY ACCESS</span><h2>Join the early-access list</h2><p>Get notified as Ada opens up to more professionals.</p><button onClick={()=>goTo('/waitlist')}>Join waitlist</button></article></div></section><footer><span>ada.            2026.            made with ❤️ in 🇳🇬.</span></footer></main>
+  return <main className="public-page"><header className="public-top"><div className="public-brand"><strong>ada</strong><span>write naturally. structure professionally.</span></div></header><section className="public-content"><span className="eyebrow">ADA EARLY ACCESS</span><h1>Write like you think. Document like a pro.</h1><p>Ada lets you scribble freely while you work, then structures what is actually there into a professional document when you need it.</p><section className="public-problems"><span className="eyebrow">THE PROBLEM</span><h2>Your notes don't arrive in professional structure.</h2><div className="public-problem-grid"><article><span className="eyebrow">FOR DOCTORS</span><h3>A patient talks. You observe. You remember.</h3><p>Symptoms, observations, medications and follow-up details come in as the consultation happens. The work of putting them into a proper clinical note comes afterwards.</p></article><article><span className="eyebrow">FOR LAWYERS</span><h3>A client tells you what happened. You collect the pieces.</h3><p>Names, dates, events, allegations, documents and things to verify rarely arrive in the order your case note needs. Structuring them is a separate job.</p></article></div><p className="public-problem-close">Other tools force you into rigid forms while you're talking to patients or clients. Ada lets you scribble freely, then structures it after. Paper notes, digital chaos, one workflow.</p></section><div className="public-actions"><article><span className="eyebrow">ADA 0.1</span><h2>{hasAdaPresence() ? 'Continue with Ada' : 'Try Ada 0.1'}</h2><p>{hasAdaPresence() ? 'Your Ada workspace is ready. Continue where you left off.' : 'The first working version of Ada is available to try now.'}</p><button onClick={()=>goTo(hasAdaPresence() ? '/0.1' : '/waitlist?from=try')}>{hasAdaPresence() ? 'Open Ada' : 'Try Ada'}</button></article><article><span className="eyebrow">EARLY ACCESS</span><h2>Join the early-access list</h2><p>Get notified as Ada opens up to more professionals.</p><button onClick={()=>goTo('/waitlist')}>Join waitlist</button></article></div></section><footer><span>ada.            2026.            made with ❤️ in 🇳🇬.</span></footer></main>
 }
 
 function App() {
@@ -360,6 +416,7 @@ function App() {
   const [scanState, setScanState] = useState('Scan note')
   const [actionsOpen, setActionsOpen] = useState(false)
   const [exportState, setExportState] = useState<'idle' | 'docx' | 'pdf'>('idle')
+  const [copyState, setCopyState] = useState('Copy to Clipboard')
   const fileInput = useRef<HTMLInputElement | null>(null)
   const scribbleCanvas = useRef<HTMLCanvasElement | null>(null)
   const scribbleStrokes = useRef<Array<Array<{x:number;y:number}>>>([])
@@ -638,7 +695,7 @@ function App() {
       </section>
       <div className="divider" onPointerDown={(e)=>{e.currentTarget.setPointerCapture(e.pointerId); const move=(ev:PointerEvent)=>handlePointer(ev as unknown as React.PointerEvent<HTMLDivElement>); const up=()=>{e.currentTarget.removeEventListener('pointermove',move as any);e.currentTarget.removeEventListener('pointerup',up)};e.currentTarget.addEventListener('pointermove',move as any);e.currentTarget.addEventListener('pointerup',up)}}><span></span></div>
       <section className="pane document-pane">
-        <div className="pane-head"><div><span className="eyebrow">02 · {workspaceMode==='quick' ? 'QUICK OUTPUT' : 'PROFESSIONAL DOCUMENT'}</span><h2>{workspaceMode==='quick' ? 'Quick Note' : document.title}</h2></div><span className="live-dot">● LIVE</span></div>
+        <div className="pane-head"><div><span className="eyebrow">02 · {workspaceMode==='quick' ? 'QUICK OUTPUT' : 'PROFESSIONAL DOCUMENT'}</span><h2>{workspaceMode==='quick' ? 'Quick Note' : document.title}</h2></div><div className="document-head-actions">{workspaceMode==='professional' && <button className="copy-button" type="button" disabled={copyState !== 'Copy to Clipboard'} onClick={async()=>{setCopyState('Copying…'); try { await copyDocumentToClipboard(document); setCopyState('Copied'); setStatus('Formatted document copied'); window.setTimeout(()=>setCopyState('Copy to Clipboard'),1800) } catch (e) { setCopyState('Copy failed'); setStatus('Copy failed: ' + (e as Error).message); window.setTimeout(()=>setCopyState('Copy to Clipboard'),2200) }}}>{copyState}</button>}<span className="live-dot">● LIVE</span></div></div>
         {workspaceMode==='professional' && profession==='doctor' && <div className="clinical-notice"><strong>{professionLocked === null ? 'Preview. Use fictional notes only. Do not enter real patient data.' : 'Documentation aid only. Not clinical advice. The clinician is responsible for the content.'}</strong>{professionLocked === null && <span>Documentation aid only. Not clinical advice. The clinician is responsible for the content.</span>}<small>Notes are sent to {document.provider_name} to generate the document.</small></div>}
         {workspaceMode==='professional' && document.needs_input.length > 0 && <div className="needs"><strong>Needs your input</strong>{document.needs_input.map(item => <button key={item.id + item.question} type="button" onClick={()=>{if(item.section_id){setFocused(item.section_id); window.requestAnimationFrame(()=>{const area=window.document.querySelector('[data-section-id="' + item.section_id + '"]') as HTMLTextAreaElement | null; area?.focus(); area?.scrollIntoView({behavior:'smooth',block:'center'})})}}}>{item.question}</button>)}</div>}
         {workspaceMode==='quick' ? <article className="document quick-output"><div className="doc-title">Quick Note</div><div className="doc-rule"></div><textarea value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Your note will appear here." /><small>Plain output · no professional structure applied</small></article> : <article className="document">

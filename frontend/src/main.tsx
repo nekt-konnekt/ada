@@ -361,6 +361,11 @@ function App() {
   const [actionsOpen, setActionsOpen] = useState(false)
   const [exportState, setExportState] = useState<'idle' | 'docx' | 'pdf'>('idle')
   const fileInput = useRef<HTMLInputElement | null>(null)
+  const scribbleCanvas = useRef<HTMLCanvasElement | null>(null)
+  const scribbleStrokes = useRef<Array<Array<{x:number;y:number}>>>([])
+  const scribbleCurrent = useRef<Array<{x:number;y:number}> | null>(null)
+  const [scribbleMode, setScribbleMode] = useState(false)
+  const [scribbleState, setScribbleState] = useState('Convert to notes')
   const timer = useRef<number | undefined>(undefined)
   const request = useRef<AbortController | null>(null)
 
@@ -384,6 +389,113 @@ function App() {
   useEffect(() => {
     try { localStorage.setItem('ada-current-draft', JSON.stringify({ profession, document })) } catch {}
   }, [profession, notes, document])
+
+  function resizeScribbleCanvas() {
+    const canvas = scribbleCanvas.current
+    if (!canvas) return
+    const rect = canvas.getBoundingClientRect()
+    const ratio = Math.min(window.devicePixelRatio || 1, 2)
+    canvas.width = Math.max(1, Math.floor(rect.width * ratio))
+    canvas.height = Math.max(1, Math.floor(rect.height * ratio))
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0)
+    ctx.lineCap = 'round'
+    ctx.lineJoin = 'round'
+    ctx.lineWidth = 2.2
+    ctx.strokeStyle = '#25302d'
+    redrawScribble()
+  }
+
+  function redrawScribble() {
+    const canvas = scribbleCanvas.current
+    if (!canvas) return
+    const rect = canvas.getBoundingClientRect()
+    const ratio = Math.min(window.devicePixelRatio || 1, 2)
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0)
+    ctx.clearRect(0, 0, rect.width, rect.height)
+    ctx.lineCap = 'round'
+    ctx.lineJoin = 'round'
+    ctx.lineWidth = 2.2
+    ctx.strokeStyle = '#25302d'
+    for (const stroke of scribbleStrokes.current) {
+      if (stroke.length < 2) continue
+      ctx.beginPath()
+      ctx.moveTo(stroke[0].x, stroke[0].y)
+      for (const point of stroke.slice(1)) ctx.lineTo(point.x, point.y)
+      ctx.stroke()
+    }
+  }
+
+  function scribblePoint(event: React.PointerEvent<HTMLCanvasElement>) {
+    const rect = event.currentTarget.getBoundingClientRect()
+    return { x: event.clientX - rect.left, y: event.clientY - rect.top }
+  }
+
+  function startScribble(event: React.PointerEvent<HTMLCanvasElement>) {
+    scribbleCurrent.current = [scribblePoint(event)]
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+
+  function moveScribble(event: React.PointerEvent<HTMLCanvasElement>) {
+    const stroke = scribbleCurrent.current
+    if (!stroke) return
+    const point = scribblePoint(event)
+    const previous = stroke[stroke.length - 1]
+    stroke.push(point)
+    const ctx = event.currentTarget.getContext('2d')
+    if (!ctx || !previous) return
+    ctx.beginPath()
+    ctx.moveTo(previous.x, previous.y)
+    ctx.lineTo(point.x, point.y)
+    ctx.stroke()
+  }
+
+  function endScribble() {
+    const stroke = scribbleCurrent.current
+    if (stroke && stroke.length > 0) scribbleStrokes.current.push(stroke)
+    scribbleCurrent.current = null
+  }
+
+  function clearScribble() {
+    scribbleStrokes.current = []
+    scribbleCurrent.current = null
+    redrawScribble()
+  }
+
+  function undoScribble() {
+    scribbleStrokes.current.pop()
+    redrawScribble()
+  }
+
+  async function convertScribbleToNotes() {
+    const canvas = scribbleCanvas.current
+    if (!canvas || scribbleStrokes.current.length === 0) {
+      setScribbleState('Write something first')
+      window.setTimeout(() => setScribbleState('Convert to notes'), 1600)
+      return
+    }
+    setScribbleState('Reading…')
+    setStatus('Reading handwriting locally…')
+    try {
+      const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'))
+      if (!blob) throw new Error('Could not capture handwriting')
+      const extracted = await runPaddleOcr(new File([blob], 'ada-scribble.png', { type: 'image/png' }))
+      if (!extracted.trim()) throw new Error('No readable handwriting found')
+      setNotes(notes.trim() ? notes.trim() + '\n\n' + extracted : extracted)
+      setScribbleState('Added to notes')
+      setStatus('Handwriting converted. Review it before Ada structures it.')
+      setScribbleMode(false)
+      clearScribble()
+    } catch (e) {
+      setScribbleState('Try again')
+      setStatus('Handwriting conversion failed: ' + (e as Error).message)
+    } finally {
+      window.setTimeout(() => setScribbleState('Convert to notes'), 1800)
+    }
+  }
 
   async function handleScan(file: File) {
     if (!file.type.startsWith('image/')) {
@@ -458,6 +570,16 @@ function App() {
   }, [document.sections])
 
   useEffect(() => {
+    if (!scribbleMode) return
+    const frame = window.requestAnimationFrame(resizeScribbleCanvas)
+    window.addEventListener('resize', resizeScribbleCanvas)
+    return () => {
+      window.cancelAnimationFrame(frame)
+      window.removeEventListener('resize', resizeScribbleCanvas)
+    }
+  }, [scribbleMode])
+
+  useEffect(() => {
     window.clearTimeout(timer.current)
     if (!notes.trim() || workspaceMode === 'quick') {
       if (!notes.trim() && workspaceMode === 'professional') { setDocument(emptyDoc(profession)); useAda.setState({ lockedSections: new Set<string>() }) }
@@ -506,7 +628,16 @@ function App() {
     <section className="workspace" style={{gridTemplateColumns:`${split}% 8px ${100-split}%`}}>
       <section className="pane notes-pane">
         <div className="pane-head"><div><span className="eyebrow">01 · YOUR NOTES</span><h2 className="notes-heading">Write however you think.</h2></div><div className="head-actions"><span className="hint">{notes.length.toLocaleString()} chars</span><button className="history-button" onClick={()=>setHistoryOpen(true)}>History{history.length ? <b>{history.length}</b> : null}</button></div></div>
-        <textarea autoFocus value={notes} onChange={e=>setNotes(e.target.value)} placeholder={profession==='doctor' ? 'Start scribbling…\n\npatient came in complaining of chest pain since yesterday…' : 'Start scribbling…\n\nclient was driving home when the other vehicle…'} />
+        <div className="notes-input-mode"><button type="button" className={!scribbleMode ? 'active' : ''} onClick={()=>setScribbleMode(false)}>Type</button><button type="button" className={scribbleMode ? 'active' : ''} onClick={()=>{setScribbleMode(true); window.requestAnimationFrame(resizeScribbleCanvas)}}>Scribble</button></div>
+        {scribbleMode ? <div className="scribble-wrap">
+          <div className="scribble-toolbar"><span>Use Apple Pencil, stylus, or finger.</span><div><button type="button" onClick={undoScribble}>Undo</button><button type="button" onClick={clearScribble}>Clear</button><button type="button" className="scribble-convert" onClick={()=>{void convertScribbleToNotes()}}>{scribbleState}</button></div></div>
+          <canvas ref={scribbleCanvas} className="scribble-canvas" onPointerDown={startScribble} onPointerMove={moveScribble} onPointerUp={endScribble} onPointerCancel={endScribble} aria-label="Handwriting input area" />
+          <small className="scribble-note">Handwriting is converted into your notes. Ada structures the converted text, not the drawing itself.</small>
+        </div> : <textarea autoFocus value={notes} onChange={e=>setNotes(e.target.value)} placeholder={profession==='doctor' ? 'Start scribbling…
+
+patient came in complaining of chest pain since yesterday…' : 'Start scribbling…
+
+client was driving home when the other vehicle…'} />}
         <div className="note-foot"><span>Anything goes. Ada will organize what is actually present.</span><div className="note-actions"><button className="menu-button" aria-label="Note actions" title="Note actions" aria-expanded={actionsOpen} onClick={()=>setActionsOpen(value=>!value)}><span className="hamburger-icon" aria-hidden="true"><i></i><i></i><i></i></span></button>{actionsOpen && <div className="actions-menu"><input ref={fileInput} className="scan-input" type="file" accept="image/*" capture="environment" onChange={e=>{const file=e.target.files?.[0]; if(file) { void handleScan(file); setActionsOpen(false) }}} /><button className="menu-item" onClick={()=>fileInput.current?.click()}>{scanState}</button><button className="menu-item menu-save" onClick={()=>{void handleSave(); setActionsOpen(false)}}>{saveState}</button><button className="menu-item" disabled={workspaceMode !== 'professional' || exportState !== 'idle'} onClick={async()=>{setExportState('docx'); setStatus('Preparing DOCX…'); try { await exportDocx(document); setStatus('DOCX saved to device') } catch (e) { setStatus('DOCX export failed: ' + (e as Error).message) } finally { setExportState('idle'); setActionsOpen(false) }}}>{exportState === 'docx' ? 'Preparing…' : 'Save as DOCX'}</button><button className="menu-item" disabled={workspaceMode !== 'professional' || exportState !== 'idle'} onClick={()=>{setExportState('pdf'); setStatus('Preparing PDF…'); try { exportPdf(document); setStatus('PDF saved to device') } catch (e) { setStatus('PDF export failed: ' + (e as Error).message) } finally { setExportState('idle'); setActionsOpen(false) }}}>{exportState === 'pdf' ? 'Preparing…' : 'Save as PDF'}</button><button className="menu-item" onClick={()=>{setNotes(''); setActionsOpen(false)}}>Clear</button></div>}</div></div>
       </section>
       <div className="divider" onPointerDown={(e)=>{e.currentTarget.setPointerCapture(e.pointerId); const move=(ev:PointerEvent)=>handlePointer(ev as unknown as React.PointerEvent<HTMLDivElement>); const up=()=>{e.currentTarget.removeEventListener('pointermove',move as any);e.currentTarget.removeEventListener('pointerup',up)};e.currentTarget.addEventListener('pointermove',move as any);e.currentTarget.addEventListener('pointerup',up)}}><span></span></div>

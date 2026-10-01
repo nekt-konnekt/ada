@@ -39,3 +39,6 @@
 
 /* Ada visual system */
 :root{font-family:Saira,ui-sans-serif,system-ui,sans-serif}.eyebrow,.hint,.live-dot,.field-empty-state,.field-lock,.field-warning,.clinical-notice,.needs,.unplaced,.warnings-summary,.status,.brand span,.home-nav,.pricing-note,footer{font-family:Saira,ui-sans-serif,system-ui,sans-serif}.pane h2,.doc-title,.history-head h2,.history-open strong,.waitlist-card h2,.lock-card h2,.public-brand strong,.public-content h1,.public-content h2,.public-content h3,.home-hero h1,.home-problem h2,.home-how h2,.home-professions h2,.home-pricing h2,.home-final h2,.pricing-grid h3{font-family:"Bebas Neue",sans-serif;letter-spacing:.01em}.workspace{border-top:3px solid #10a874}.divider span{background:#10a874}.home-hero{border-top:3px solid #10a874}.public-top{border-top:3px solid #10a874}.home-primary,.home-final button,.pricing-pro button{box-shadow:0 8px 24px #10a87444}.home-primary:hover,.home-final button:hover,.pricing-pro button:hover{filter:saturate(1.2)}
+
+/* Green accent headings */
+.accent-heading{color:#10a874!important}.home-hero h1 .accent-heading{color:#10a874!important}.home-how h2 .accent-heading,.home-trust h2 .accent-heading,.home-professions h2 .accent-heading,.home-pricing h2 .accent-heading,.home-final h2 .accent-heading{color:#10a874!important}.section-intro .accent-heading{color:#10a874!important}

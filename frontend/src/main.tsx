@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { create } from 'zustand'
 import { Document, HeadingLevel, Packer, Paragraph, TextRun } from 'docx'
 import { jsPDF } from 'jspdf'
+import { PaddleOCR } from '@paddleocr/paddleocr-js'
 import './styles.css'
 
 type Profession = 'doctor' | 'lawyer'
@@ -89,18 +90,15 @@ async function deleteLocalNote(id: string): Promise<void> {
   });
 }
 
-let paddleOcrPromise: Promise<any> | null = null;
-const paddleOcrModuleUrl = 'https://esm.sh/@paddleocr/paddleocr-js@0.4.2?bundle';
+let paddleOcrPromise: Promise<PaddleOCR> | null = null;
 
 async function runPaddleOcr(file: File): Promise<string> {
   if (!paddleOcrPromise) {
-    paddleOcrPromise = import(/* @vite-ignore */ paddleOcrModuleUrl).then(async ({ PaddleOCR }) =>
-      PaddleOCR.create({
-        lang: 'en',
-        ocrVersion: 'PP-OCRv5',
-        ortOptions: { backend: 'auto' },
-      })
-    );
+    paddleOcrPromise = PaddleOCR.create({
+      lang: 'en',
+      ocrVersion: 'PP-OCRv5',
+      ortOptions: { backend: 'auto' },
+    });
   }
   const ocr = await paddleOcrPromise;
   const results = await ocr.predict(file);

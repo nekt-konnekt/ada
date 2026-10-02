@@ -157,3 +157,22 @@ body{background:#F8FAFC;color:#1E293B}
 .product-topline i{background:#4A56C3}
 .pricing-pro .eyebrow,.pricing-pro>p,.pricing-pro ul{color:#FFFFFF}
 .pricing-pro button{background:#FFFFFF;color:#4A56C3;border-color:#FFFFFF}
+
+
+/* Preserve portrait workspace geometry */
+@media (max-width:800px){
+  .app{width:100%;overflow-x:hidden}
+  .workspace{display:flex!important;flex-direction:column!important;width:100%;min-width:0;overflow:visible}
+  .pane{width:100%;min-width:0;max-width:100%}
+  .notes-pane{height:46vh;min-height:300px;width:100%;padding:20px}
+  .document-pane{height:auto;width:100%;padding:20px;overflow:visible}
+  .divider{width:100%;height:8px;min-height:8px;flex:0 0 8px;cursor:row-resize}
+  .document{width:100%;max-width:780px;margin:0 auto;padding:25px 22px}
+  .pane-head{width:100%;min-width:0}
+  .head-actions{min-width:0}
+  .notes-pane textarea{min-height:0;width:100%}
+  .document-pane .document,.document-pane .needs,.document-pane .clinical-notice,.document-pane .unplaced,.document-pane .warnings-summary{box-sizing:border-box}
+}
+@media (min-width:801px){
+  .workspace{grid-template-columns:var(--ada-split,50%) 8px calc(100% - var(--ada-split,50%) - 8px)}
+}

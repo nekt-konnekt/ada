@@ -90,7 +90,7 @@ async function deleteLocalNote(id: string): Promise<void> {
   });
 }
 
-let paddleOcrPromise: Promise<PaddleOCR> | null = null;
+let paddleOcrPromise: Promise<any> | null = null;
 
 async function runPaddleOcr(file: File): Promise<string> {
   if (!paddleOcrPromise) {
@@ -101,6 +101,7 @@ async function runPaddleOcr(file: File): Promise<string> {
     });
   }
   const ocr = await paddleOcrPromise;
+  if (!ocr) throw new Error('PaddleOCR could not initialize in this browser');
   const results = await ocr.predict(file);
   return results
     .flatMap((result: any) => result?.items ?? [])

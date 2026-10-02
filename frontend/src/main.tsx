@@ -93,7 +93,7 @@ let paddleOcrPromise: Promise<any> | null = null;
 
 async function runPaddleOcr(file: File): Promise<string> {
   if (!paddleOcrPromise) {
-    paddleOcrPromise = import('@paddleocr/paddleocr-js').then(async ({ PaddleOCR }) =>
+    paddleOcrPromise = import('https://esm.sh/@paddleocr/paddleocr-js@0.4.2?bundle').then(async ({ PaddleOCR }) =>
       PaddleOCR.create({
         lang: 'en',
         ocrVersion: 'PP-OCRv5',

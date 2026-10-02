@@ -183,3 +183,11 @@ body{background:#F8FAFC;color:#1E293B}
 
 /* Hide usage limits from workspace footer */
 footer .usage-limits,footer .plan-limits,footer [class*="usage"],footer [class*="limit"]{display:none!important}
+
+
+/* Expanded handwriting board */
+.scribble-wrap{overflow:auto}
+.scribble-canvas{height:720px;min-height:720px;flex:0 0 720px}
+@media(max-width:800px){
+  .scribble-canvas{height:620px;min-height:620px;flex:0 0 620px}
+}

@@ -176,3 +176,10 @@ body{background:#F8FAFC;color:#1E293B}
 @media (min-width:801px){
   .workspace{grid-template-columns:var(--ada-split,50%) 8px calc(100% - var(--ada-split,50%) - 8px)}
 }
+
+/* Workspace typography: Playfair Display */
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700&display=swap');
+.pane h2,.doc-title,.document,.doc-section textarea,.notes-pane textarea,.history-head h2,.history-open strong,.waitlist-card h2,.lock-card h2{font-family:"Playfair Display",serif}
+
+/* Hide usage limits from workspace footer */
+footer .usage-limits,footer .plan-limits,footer [class*="usage"],footer [class*="limit"]{display:none!important}

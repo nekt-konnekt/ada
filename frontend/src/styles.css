@@ -42,3 +42,46 @@
 
 /* Green accent headings */
 .accent-heading{color:#3E3193!important}.home-hero h1 .accent-heading{color:#3E3193!important}.home-how h2 .accent-heading,.home-trust h2 .accent-heading,.home-professions h2 .accent-heading,.home-pricing h2 .accent-heading{color:#3E3193!important}.home-final h2 .accent-heading{color:#3E3193!important}.section-intro .accent-heading{color:#3E3193!important}
+
+
+/* Clean professional visual system */
+:root{color:#1F2937;background:#FFFFFF}
+body{background:#FFFFFF;color:#1F2937}
+.app{background:#FFFFFF;color:#1F2937}
+.topbar{background:#3E3193;border-bottom:1px solid #E5E7EB;color:#FFFFFF}
+.brand strong{color:#FFFFFF}.brand span{color:#E5E7EB}.logo{background:#4A56C3;color:#FFFFFF}
+.mode{background:#FFFFFF}.mode button,.note-foot button{color:#1F2937}.mode button.active{background:#4A56C3;color:#FFFFFF;box-shadow:none}
+.status{color:#E5E7EB}.status i{background:#7AA3FF}
+.workspace{background:#FFFFFF}.notes-pane,.document-pane{background:#FFFFFF}
+.document{background:#FFFFFF;border:1px solid #E5E7EB;box-shadow:0 3px 18px rgba(31,41,55,.06)}
+.notes-pane textarea{background:#FFFFFF;color:#1F2937}.notes-pane textarea::placeholder{color:#9CA3AF}
+.note-foot{border-top:1px solid #E5E7EB;color:#6B7280}.divider{background:#E5E7EB}.divider span{background:#E5E7EB}
+.pane h2,.doc-title,.eyebrow{color:#3E3193}.hint,.live-dot{color:#6B7280}.live-dot{color:#7AA3FF}
+.doc-rule{background:#E5E7EB}.doc-section textarea{background:#FFFFFF;color:#1F2937;border:1px solid transparent}
+.doc-section textarea::placeholder{color:#9CA3AF}.doc-section textarea:focus{border-color:#7AA3FF;background:#FFFFFF}.doc-section small{color:#6B7280}
+.field-lock{border-color:#E5E7EB;background:#FFFFFF;color:#1F2937}.clinical-notice{background:#FFFFFF;border-color:#E5E7EB;color:#1F2937}.clinical-notice small{color:#6B7280}
+.needs,.warnings-summary{background:#FFFFFF}.unplaced{background:#FFFFFF;border-color:#E5E7EB;color:#1F2937}
+.scan-button,.history-button,.close-button,.menu-button,.copy-button{background:#FFFFFF!important;border-color:#E5E7EB!important;color:#1F2937!important}
+.scan-button:hover,.history-button:hover,.close-button:hover,.menu-button:hover,.copy-button:hover{background:#F9FAFB!important}
+.save-button,.waitlist-button,.waitlist-submit{background:#4A56C3!important;color:#FFFFFF!important}
+.notes-input-mode{border-bottom-color:#E5E7EB}.notes-input-mode button,.scribble-toolbar button{background:#FFFFFF!important;border-color:#E5E7EB!important;color:#1F2937!important}
+.notes-input-mode button.active,.scribble-toolbar .scribble-convert{background:#4A56C3!important;color:#FFFFFF!important;border-color:#4A56C3!important}
+.scribble-canvas{background:#FFFFFF;border-color:#E5E7EB}.scribble-note,.scribble-toolbar{color:#6B7280}
+.quick-output>textarea{background:#FFFFFF;color:#1F2937}.quick-output>textarea::placeholder{color:#9CA3AF}.quick-output>small{color:#6B7280;border-top-color:#E5E7EB}
+.history-backdrop,.waitlist-backdrop,.lock-backdrop{background:rgba(31,41,55,.35)}
+.history-panel,.waitlist-card,.lock-card{background:#FFFFFF;border-color:#E5E7EB}.history-head{border-bottom-color:#E5E7EB}
+.history-head p,.history-empty{color:#6B7280}.history-item{background:#FFFFFF;border-color:#E5E7EB}.history-open strong{color:#1F2937}.history-open small{color:#6B7280}
+.waitlist-card p,.lock-card p{color:#4B5563}.waitlist-profession{background:#F9FAFB}.lock-options button{background:#FFFFFF;border-color:#E5E7EB}.lock-options button:hover{background:#F9FAFB;border-color:#7AA3FF}.lock-options strong{color:#1F2937}.lock-options span{color:#6B7280}
+.public-page,.ada-home{background:#FFFFFF;color:#1F2937}.public-top{background:#3E3193;border-bottom-color:#E5E7EB}.public-brand{color:#FFFFFF}.public-brand span{color:#E5E7EB}
+.public-content>p,.public-actions p,.public-problem-grid p,.public-problem-close{color:#4B5563}.public-actions article,.public-form,.public-problem-grid article{background:#FFFFFF;border-color:#E5E7EB}
+.public-role button{background:#FFFFFF;border-color:#E5E7EB;color:#1F2937}.public-role button.selected{border-color:#7AA3FF;background:#FFFFFF}
+.public-actions button,.home-nav button,.home-primary,.home-final button{background:#4A56C3;color:#FFFFFF}
+.home-nav a,.hero-copy>p,.section-intro>p,.problem-columns p,.how-grid p,.profession-grid p,.home-trust p,.roi-copy p{color:#4B5563}
+.home-problem,.home-how,.home-professions,.home-trust,.home-pricing{background:#FFFFFF;border-top-color:#E5E7EB}.home-hero{background:#FFFFFF;border-top-color:#E5E7EB}
+.hero-product,.how-grid article,.profession-grid article,.pricing-grid article{background:#FFFFFF;border-color:#E5E7EB}.product-split{border-color:#E5E7EB}.product-input{background:#FFFFFF;border-right-color:#E5E7EB}.product-output{background:#FFFFFF}
+.product-input p,.product-output p{color:#4B5563}.product-topline,.product-bottom{color:#6B7280}.product-input small,.product-output small{color:#9CA3AF}
+.review-tag,.profession-icon{background:#F9FAFB;color:#4A56C3}.problem-columns article,.benefit,.trust-points article{border-top-color:#E5E7EB;border-bottom-color:#E5E7EB}.problem-columns article>span,.benefit span{color:#6B7280}
+.video-placeholder{background:#F9FAFB;color:#4B5563}.pricing-grid article>p{color:#4B5563}.pricing-grid article button{background:#FFFFFF;border-color:#E5E7EB;color:#1F2937}
+.pricing-grid .pricing-pro{background:#4A56C3;color:#FFFFFF}.home-final{background:#3E3193;color:#FFFFFF}.home-final h2{color:#FFFFFF}.home-final p{color:#E5E7EB}.home-final button{background:#FFFFFF;color:#3E3193}
+.ada-home footer{background:#FFFFFF;border-top-color:#E5E7EB;color:#6B7280}.ada-home footer span:last-child{color:#6B7280}
+.accent-heading,.home-hero h1 .accent-heading,.home-how h2 .accent-heading,.home-trust h2 .accent-heading,.home-professions h2 .accent-heading,.home-pricing h2 .accent-heading,.home-final h2 .accent-heading,.section-intro .accent-heading{color:#3E3193!important}

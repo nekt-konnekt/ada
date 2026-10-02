@@ -640,7 +640,6 @@ function App() {
         <button className={workspaceMode==='professional' ? 'active' : ''} onClick={()=>{setWorkspaceMode('professional');setStatus(notes.trim()?'Updating…':'Ready')}}>Professional Document</button>
       </div>
       <span className="locked-mode">{professionLocked === null ? 'Clinical mode (preview)' : (profession==='doctor' ? 'Doctor' : 'Lawyer') + ' · locked'}</span>
-      <button className="waitlist-button" onClick={()=>goTo("/waitlist")}>Waitlist</button>
       <div className="status"><i></i>{status}</div>
     </header>
     <section className="workspace" style={{gridTemplateColumns:`${split}% 8px ${100-split}%`}}>

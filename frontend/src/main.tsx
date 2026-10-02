@@ -90,10 +90,11 @@ async function deleteLocalNote(id: string): Promise<void> {
 }
 
 let paddleOcrPromise: Promise<any> | null = null;
+const paddleOcrModuleUrl = 'https://esm.sh/@paddleocr/paddleocr-js@0.4.2?bundle';
 
 async function runPaddleOcr(file: File): Promise<string> {
   if (!paddleOcrPromise) {
-    paddleOcrPromise = import('https://esm.sh/@paddleocr/paddleocr-js@0.4.2?bundle').then(async ({ PaddleOCR }) =>
+    paddleOcrPromise = import(/* @vite-ignore */ paddleOcrModuleUrl).then(async ({ PaddleOCR }) =>
       PaddleOCR.create({
         lang: 'en',
         ocrVersion: 'PP-OCRv5',
@@ -680,7 +681,7 @@ function App() {
           {workspaceMode==='professional' && document.warnings.length > 0 && <div className="warnings-summary"><strong>Review warnings</strong>{document.warnings.map((warning,index)=><span key={index}>{warning.message}</span>)}</div>}
       </section>
     </section>
-    <footer><span>Ada.            2026.            made with ❤️ in 🇳🇬.</span><span>Free: QN {usage.quick}/10 · Doc {usage.professional}/10 · OCR {usage.scan}/10 · Scribble unlimited</span></footer>
+    <footer><span>Ada.            2026.            made with ❤️ in 🇳🇬.</span></footer>
     {gateMessage && <div className="lock-backdrop" onClick={()=>setGateMessage('')}><div className="lock-card" onClick={e=>e.stopPropagation()}><span className="eyebrow">ADA PROFESSIONAL</span><h2>Professional feature</h2><p>{gateMessage}</p><div className="lock-options"><button onClick={()=>{setGateMessage(''); goTo('/#pricing')}}><strong>View Professional</strong><span>Unlimited usage and professional exports.</span></button><button onClick={()=>setGateMessage('')}><strong>Keep using Free</strong><span>10 uses per feature each month.</span></button></div></div></div>}
     {historyOpen && <div className="history-backdrop" onClick={()=>setHistoryOpen(false)}>
       <aside className="history-panel" onClick={e=>e.stopPropagation()}>

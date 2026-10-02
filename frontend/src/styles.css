@@ -85,3 +85,75 @@ body{background:#FFFFFF;color:#1F2937}
 .pricing-grid .pricing-pro{background:#4A56C3;color:#FFFFFF}.home-final{background:#3E3193;color:#FFFFFF}.home-final h2{color:#FFFFFF}.home-final p{color:#E5E7EB}.home-final button{background:#FFFFFF;color:#3E3193}
 .ada-home footer{background:#FFFFFF;border-top-color:#E5E7EB;color:#6B7280}.ada-home footer span:last-child{color:#6B7280}
 .accent-heading,.home-hero h1 .accent-heading,.home-how h2 .accent-heading,.home-trust h2 .accent-heading,.home-professions h2 .accent-heading,.home-pricing h2 .accent-heading,.home-final h2 .accent-heading,.section-intro .accent-heading{color:#3E3193!important}
+
+
+/* Ada neutral design system */
+:root{color:#1E293B;background:#F8FAFC}
+body{background:#F8FAFC;color:#1E293B}
+.app{background:#F8FAFC;color:#1E293B}
+.topbar{background:#FFFFFF;border-bottom:1px solid #E2E8F0;color:#1E293B}
+.brand strong{color:#1E293B}.brand span{color:#64748B}
+.logo{background:#4A56C3;color:#FFFFFF}
+.mode,.mode-switch{background:#F8FAFC}
+.mode button,.note-foot button,.mode-switch button{color:#1E293B}
+.mode button.active,.mode-switch button.active{background:#4A56C3;color:#FFFFFF;box-shadow:0 1px 3px rgba(15,23,42,.08)}
+.status{color:#64748B}.status i{background:#4A56C3}
+.workspace{background:#F8FAFC}
+.notes-pane,.document-pane{background:#F8FAFC}
+.document{background:#FFFFFF;border:1px solid #E2E8F0;box-shadow:0 3px 18px rgba(15,23,42,.06)}
+.pane h2,.doc-title,.eyebrow{color:#1E293B}
+.hint,.live-dot{color:#64748B}.live-dot{color:#4A56C3}
+.notes-pane textarea{background:#FFFFFF;color:#1E293B}.notes-pane textarea::placeholder{color:#94A3B8}
+.note-foot{border-top:1px solid #E2E8F0;color:#64748B}
+.divider{background:#E2E8F0}.divider span{background:#E2E8F0}
+.doc-rule{background:#E2E8F0}
+.doc-section textarea{background:#FFFFFF;color:#1E293B;border:1px solid transparent}
+.doc-section textarea::placeholder{color:#94A3B8}.doc-section textarea:focus{border-color:#4A56C3;background:#FFFFFF}
+.doc-section small{color:#64748B}
+.field-lock{border-color:#E2E8F0;background:#FFFFFF;color:#1E293B}
+.clinical-notice,.needs,.unplaced,.warnings-summary{background:#FFFFFF;border-color:#E2E8F0;color:#1E293B}
+.clinical-notice small{color:#64748B}
+.scan-button,.history-button,.close-button,.menu-button,.copy-button{background:#FFFFFF!important;border-color:#E2E8F0!important;color:#1E293B!important}
+.scan-button:hover,.history-button:hover,.close-button:hover,.menu-button:hover,.copy-button:hover{background:#F8FAFC!important}
+.save-button,.waitlist-button,.waitlist-submit{background:#4A56C3!important;color:#FFFFFF!important}
+.notes-input-mode{border-bottom-color:#E2E8F0}
+.notes-input-mode button,.scribble-toolbar button{background:#FFFFFF!important;border-color:#E2E8F0!important;color:#1E293B!important}
+.notes-input-mode button.active,.scribble-toolbar .scribble-convert{background:#4A56C3!important;color:#FFFFFF!important;border-color:#4A56C3!important}
+.scribble-canvas{background:#FFFFFF;border-color:#E2E8F0}
+.scribble-note,.scribble-toolbar{color:#64748B}
+.quick-output>textarea{background:#FFFFFF;color:#1E293B}.quick-output>textarea::placeholder{color:#94A3B8}
+.quick-output>small{color:#64748B;border-top-color:#E2E8F0}
+.history-backdrop,.waitlist-backdrop,.lock-backdrop{background:rgba(15,23,42,.35)}
+.history-panel,.waitlist-card,.lock-card{background:#FFFFFF;border-color:#E2E8F0;box-shadow:0 20px 60px rgba(15,23,42,.08)}
+.history-head{border-bottom-color:#E2E8F0}.history-head p,.history-empty{color:#64748B}
+.history-item{background:#FFFFFF;border-color:#E2E8F0}.history-open strong{color:#1E293B}.history-open small{color:#64748B}
+.waitlist-card p,.lock-card p{color:#475569}.waitlist-profession{background:#F8FAFC}
+.lock-options button{background:#FFFFFF;border-color:#E2E8F0}.lock-options button:hover{background:#F8FAFC;border-color:#4A56C3}
+.lock-options strong{color:#1E293B}.lock-options span{color:#64748B}
+.public-page,.ada-home{background:#F8FAFC;color:#1E293B}
+.public-top{background:#FFFFFF;border-top:0;border-bottom:1px solid #E2E8F0}
+.public-brand{color:#1E293B}.public-brand span{color:#64748B}
+.public-content>p,.public-actions p,.public-problem-grid p,.public-problem-close{color:#475569}
+.public-actions article,.public-form,.public-problem-grid article{background:#FFFFFF;border-color:#E2E8F0;box-shadow:0 3px 18px rgba(15,23,42,.04)}
+.public-role button{background:#FFFFFF;border-color:#E2E8F0;color:#1E293B}.public-role button.selected{border-color:#4A56C3;background:#FFFFFF}
+.public-actions button,.home-nav button,.home-primary,.home-final button{background:#4A56C3;color:#FFFFFF}
+.home-nav a,.hero-copy>p,.section-intro>p,.problem-columns p,.how-grid p,.profession-grid p,.home-trust p,.roi-copy p{color:#475569}
+.home-problem,.home-how,.home-professions,.home-trust,.home-pricing{background:#F8FAFC;border-top-color:#E2E8F0}
+.home-hero{background:#F8FAFC;border-top:0}
+.hero-product,.how-grid article,.profession-grid article,.pricing-grid article{background:#FFFFFF;border-color:#E2E8F0;box-shadow:0 3px 18px rgba(15,23,42,.04)}
+.product-split{border-color:#E2E8F0}.product-input{background:#FFFFFF;border-right-color:#E2E8F0}.product-output{background:#FFFFFF}
+.product-input p,.product-output p{color:#475569}.product-topline,.product-bottom{color:#64748B}.product-input small,.product-output small{color:#94A3B8}
+.review-tag,.profession-icon{background:#F8FAFC;color:#4A56C3}
+.problem-columns article,.benefit,.trust-points article{border-top-color:#E2E8F0;border-bottom-color:#E2E8F0}
+.problem-columns article>span,.benefit span{color:#64748B}
+.video-placeholder{background:#FFFFFF;color:#475569;border:1px solid #E2E8F0}
+.pricing-grid article>p{color:#475569}.pricing-grid article button{background:#FFFFFF;border-color:#E2E8F0;color:#1E293B}
+.pricing-grid .pricing-pro{background:#4A56C3;color:#FFFFFF;border-color:#4A56C3}
+.home-final{background:#1E293B;color:#FFFFFF}.home-final h2{color:#FFFFFF}.home-final p{color:#CBD5E1}.home-final button{background:#FFFFFF;color:#4A56C3}
+.ada-home footer{background:#F8FAFC;border-top-color:#E2E8F0;color:#64748B}.ada-home footer span:last-child{color:#64748B}
+.accent-heading,.home-hero h1 .accent-heading,.home-how h2 .accent-heading,.home-trust h2 .accent-heading,.home-professions h2 .accent-heading,.home-pricing h2 .accent-heading,.home-final h2 .accent-heading,.section-intro .accent-heading{color:#1E293B!important}
+.play-mark{background:#4A56C3}
+.step-number{color:#4A56C3}
+.product-topline i{background:#4A56C3}
+.pricing-pro .eyebrow,.pricing-pro>p,.pricing-pro ul{color:#FFFFFF}
+.pricing-pro button{background:#FFFFFF;color:#4A56C3;border-color:#FFFFFF}

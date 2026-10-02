@@ -102,9 +102,14 @@ async function runPaddleOcr(file: File): Promise<string> {
     );
   }
   const ocr = await paddleOcrPromise;
-  const [result] = await ocr.predict(file);
-  return (result?.items ?? [])
-    .map((item: { text?: string }) => item.text?.trim() || '')
+  const results = await ocr.predict(file);
+  return results
+    .flatMap((result: any) => result?.items ?? [])
+    .map((item: any) => {
+      const text = typeof item?.text === 'string' ? item.text.trim() : '';
+      const score = Number(item?.score ?? item?.confidence ?? 1);
+      return text && score >= 0.25 ? text : '';
+    })
     .filter(Boolean)
     .join('\n');
 }

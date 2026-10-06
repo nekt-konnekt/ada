@@ -428,8 +428,10 @@ function App() {
   const setFocused=useAda(s=>s.setFocused), editSection=useAda(s=>s.editSection), unlockSection=useAda(s=>s.unlockSection)
   const [status, setStatus] = useState('Ready')
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>('professional')
-  const [professionLocked, setProfessionLocked] = useState<Profession | null>(null)
+  const [professionLocked, setProfessionLocked] = useState<Profession>('doctor')
   const [split, setSplit] = useState(50)
+  const [workflowStep, setWorkflowStep] = useState<'capture' | 'structure' | 'review' | 'finish'>('capture')
+  const [encounterComplete, setEncounterComplete] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [history, setHistory] = useState<SavedNote[]>([])
   const [saveState, setSaveState] = useState('Save Note')
@@ -671,12 +673,6 @@ function App() {
     }
   }
 
-  function chooseProfession(next: Profession) {
-    localStorage.setItem(PROFESSION_KEY, next)
-    setProfessionLocked(next)
-    setProfession(next)
-  }
-
   function openSaved(note: SavedNote) {
     useAda.setState({ profession: note.profession, notes: '', document: normalizeDocument(note.document), focusedSection: null, lockedSections: new Set<string>() })
     setHistoryOpen(false)
@@ -686,6 +682,31 @@ function App() {
   async function removeSaved(id: string) {
     await deleteLocalNote(id)
     setHistory(await listLocalNotes())
+  }
+
+  useEffect(() => {
+    if (profession !== 'doctor') {
+      localStorage.setItem(PROFESSION_KEY, 'doctor')
+      setProfession('doctor')
+    }
+  }, [])
+
+  function startNewEncounter() {
+    useAda.setState({ profession: 'doctor', notes: '', document: emptyDoc('doctor'), focusedSection: null, lockedSections: new Set<string>() })
+    setWorkflowStep('capture')
+    setEncounterComplete(false)
+    setStatus('New clinical encounter')
+  }
+
+  function markReviewComplete() {
+    if (document.sections.some(section => !section.content.trim())) {
+      setStatus('Review the empty fields before finishing')
+      setWorkflowStep('review')
+      return
+    }
+    setEncounterComplete(true)
+    setWorkflowStep('finish')
+    setStatus('Ready to finish · clinician review complete')
   }
 
   useEffect(() => {
@@ -740,7 +761,7 @@ function App() {
         const next = normalizeDocument(await r.json())
         const current = useAda.getState()
         const merged = { ...next, sections: next.sections.map(section => { const currentSection = current.document.sections.find(item => item.id === section.id); return current.lockedSections.has(section.id) && currentSection ? currentSection : section }) }
-        setDocument(merged); setStatus(next.provider === 'local-demo' ? 'Local demo engine' : 'Live: ' + next.provider)
+        setDocument(merged); setWorkflowStep('structure'); setStatus(next.provider === 'local-demo' ? 'Local demo engine' : 'Live: ' + next.provider)
       } catch (e) {
         if ((e as Error).name !== 'AbortError') setStatus('Could not update: ' + (e as Error).message)
       }
@@ -755,35 +776,41 @@ function App() {
 
   return <main className="app">
     <header className="topbar">
-      <div className="brand"><div><strong>Ada</strong></div></div>
-      <div className="mode-switch" aria-label="Workspace mode">
-        <button className={workspaceMode==='quick' ? 'active' : ''} onClick={()=>{setWorkspaceMode('quick');setStatus(notes.trim()?'Quick note':'Ready')}}>Quick Note</button>
-        <button className={workspaceMode==='professional' ? 'active' : ''} onClick={()=>{setWorkspaceMode('professional');setStatus(notes.trim()?'Updating…':'Ready')}}>Professional Document</button>
-      </div>
+      <div className="brand"><div><strong>Ada</strong><span>Clinical Documentation</span></div></div>
+      <div className="workspace-title">Clinical Documentation</div>
       <div className="workspace-controls">
         <button type="button" className={privateMode ? 'private-toggle active' : 'private-toggle'} onClick={togglePrivateMode} title="Private mode keeps structuring on this device and does not call the AI API">◉ {privateMode ? 'Private' : 'Online AI'}</button>
-        <button type="button" className="profession-toggle" onClick={() => chooseProfession(profession === 'doctor' ? 'lawyer' : 'doctor')} title="Switch profession">{profession === 'doctor' ? 'Doctor' : 'Lawyer'} ↔</button>
-        <span className="usage-pill">{isProfessionalPlan() ? 'Professional · unlimited' : `Free · ${usage.professional}/10 docs`}</span>
+        <span className="usage-pill">{isProfessionalPlan() ? 'Professional · unlimited' : 'Free · ' + usage.professional + '/10 docs'}</span>
       </div>
       <div className="status"><i></i>{status}</div>
     </header>
+    <nav className="workflow-bar" aria-label="Clinical documentation workflow">
+      <div className={workflowStep === 'capture' ? 'workflow-step active' : 'workflow-step'}><span>1</span><strong>Capture</strong><small>Talk, type or scan</small></div>
+      <div className="workflow-line"></div>
+      <div className={workflowStep === 'structure' ? 'workflow-step active' : 'workflow-step'}><span>2</span><strong>Structure</strong><small>Ada organises the note</small></div>
+      <div className="workflow-line"></div>
+      <div className={workflowStep === 'review' ? 'workflow-step active' : 'workflow-step'}><span>3</span><strong>Review</strong><small>You verify every field</small></div>
+      <div className="workflow-line"></div>
+      <div className={workflowStep === 'finish' ? 'workflow-step active' : 'workflow-step'}><span>4</span><strong>Finish</strong><small>Save or export</small></div>
+      <button className="new-encounter-button" type="button" onClick={startNewEncounter}>+ New encounter</button>
+    </nav>
     <section className="workspace" style={{gridTemplateColumns:`${split}% 8px ${100-split}%`}}>
       <section className="pane notes-pane">
-        <div className="pane-head"><div><span className="eyebrow">01 · YOUR NOTES</span><h2 className="notes-heading">Write however you think.</h2></div><div className="head-actions"><span className="hint">{notes.length.toLocaleString()} chars</span><button className="history-button" onClick={()=>setHistoryOpen(true)}>History{history.length ? <b>{history.length}</b> : null}</button></div></div>
+        <div className="pane-head"><div><span className="eyebrow">01 · CAPTURE</span><h2 className="notes-heading">Write however you think.</h2></div><div className="head-actions"><span className="hint">{notes.length.toLocaleString()} chars</span><button className="history-button" onClick={()=>setHistoryOpen(true)}>History{history.length ? <b>{history.length}</b> : null}</button></div></div>
         <div className="notes-input-mode"><button type="button" className={!scribbleMode ? 'active' : ''} onClick={()=>setScribbleMode(false)}>Type</button><button type="button" className={scribbleMode ? 'active' : ''} onClick={()=>{setScribbleMode(true); window.requestAnimationFrame(resizeScribbleCanvas)}}>Scribble</button><button type="button" className={voiceState === 'listening' ? 'voice-button listening' : 'voice-button'} onClick={toggleVoice}>{voiceState === 'listening' ? '● Listening…' : '🎙 Voice'}</button></div>
         {scribbleMode ? <div className="scribble-wrap">
           <div className="scribble-toolbar"><span>Use Apple Pencil, stylus, or finger.</span><div><button type="button" onClick={undoScribble}>Undo</button><button type="button" onClick={clearScribble}>Clear</button><button type="button" className="scribble-convert" onClick={()=>{void convertScribbleToNotes()}}>{scribbleState}</button></div></div>
           <canvas ref={scribbleCanvas} className="scribble-canvas" onPointerDown={startScribble} onPointerMove={moveScribble} onPointerUp={endScribble} onPointerCancel={endScribble} aria-label="Handwriting input area" />
           <small className="scribble-note">Handwriting is converted into your notes. Ada structures the converted text, not the drawing itself.</small>
         </div> : <textarea autoFocus value={notes} onChange={e=>{const value=e.target.value; if (workspaceMode==='quick' && !notes.trim() && value.trim() && !requireFreeUse('quick','Quick Note')) return; setNotes(value)}} placeholder={profession==='doctor' ? 'Start scribbling…\n\npatient came in complaining of chest pain since yesterday…' : 'Start scribbling…\n\nclient was driving home when the other vehicle…'} />}
-        <div className="note-foot"><span></span><div className="note-actions"><button className="menu-button" aria-label="Note actions" title="Note actions" aria-expanded={actionsOpen} onClick={()=>setActionsOpen(value=>!value)}><span className="hamburger-icon" aria-hidden="true"><i></i><i></i><i></i></span></button>{actionsOpen && <div className="actions-menu"><input ref={fileInput} className="scan-input" type="file" accept="image/*" capture="environment" onChange={e=>{const file=e.target.files?.[0]; if(file) { void handleScan(file); setActionsOpen(false) }}} /><button className="menu-item" onClick={()=>fileInput.current?.click()}>{scanState}</button><button className="menu-item menu-save" onClick={()=>{void handleSave(); setActionsOpen(false)}}>{saveState}</button><button className="menu-item" disabled={workspaceMode !== 'professional' || exportState !== 'idle' || !isProfessionalPlan()} title={!isProfessionalPlan() ? 'Professional plan required' : undefined} onClick={async()=>{setExportState('docx'); setStatus('Preparing DOCX…'); try { await exportDocx(document); setStatus('DOCX saved to device') } catch (e) { setStatus('DOCX export failed: ' + (e as Error).message) } finally { setExportState('idle'); setActionsOpen(false) }}}>{exportState === 'docx' ? 'Preparing…' : 'Save as DOCX'}</button><button className="menu-item" disabled={workspaceMode !== 'professional' || exportState !== 'idle' || !isProfessionalPlan()} title={!isProfessionalPlan() ? 'Professional plan required' : undefined} onClick={()=>{setExportState('pdf'); setStatus('Preparing PDF…'); try { exportPdf(document); setStatus('PDF saved to device') } catch (e) { setStatus('PDF export failed: ' + (e as Error).message) } finally { setExportState('idle'); setActionsOpen(false) }}}>{exportState === 'pdf' ? 'Preparing…' : 'Save as PDF'}</button><button className="menu-item" onClick={()=>{setNotes(''); setActionsOpen(false)}}>Clear</button></div>}</div></div>
+        <div className="note-foot"><span>{encounterComplete ? 'Ready to finish' : 'Draft · saved locally'}</span><div className="note-actions"><button className="menu-button" aria-label="Note actions" title="Note actions" aria-expanded={actionsOpen} onClick={()=>setActionsOpen(value=>!value)}><span className="hamburger-icon" aria-hidden="true"><i></i><i></i><i></i></span></button>{actionsOpen && <div className="actions-menu"><input ref={fileInput} className="scan-input" type="file" accept="image/*" capture="environment" onChange={e=>{const file=e.target.files?.[0]; if(file) { void handleScan(file); setActionsOpen(false) }}} /><button className="menu-item" onClick={()=>fileInput.current?.click()}>{scanState}</button><button className="menu-item menu-save" onClick={()=>{void handleSave(); setActionsOpen(false)}}{saveState === 'Save Note' ? 'Save Draft' : saveState}</button><button className="menu-item" disabled={workspaceMode !== 'professional' || exportState !== 'idle' || !isProfessionalPlan()} title={!isProfessionalPlan() ? 'Professional plan required' : undefined} onClick={async()=>{setExportState('docx'); setStatus('Preparing DOCX…'); try { await exportDocx(document); setStatus('DOCX saved to device') } catch (e) { setStatus('DOCX export failed: ' + (e as Error).message) } finally { setExportState('idle'); setActionsOpen(false) }}}>{exportState === 'docx' ? 'Preparing…' : 'Save as DOCX'}</button><button className="menu-item" disabled={workspaceMode !== 'professional' || exportState !== 'idle' || !isProfessionalPlan()} title={!isProfessionalPlan() ? 'Professional plan required' : undefined} onClick={()=>{setExportState('pdf'); setStatus('Preparing PDF…'); try { exportPdf(document); setStatus('PDF saved to device') } catch (e) { setStatus('PDF export failed: ' + (e as Error).message) } finally { setExportState('idle'); setActionsOpen(false) }}}>{exportState === 'pdf' ? 'Preparing…' : 'Save as PDF'}</button><button className="menu-item" onClick={()=>{setNotes(''); setActionsOpen(false)}}>Clear</button></div>}</div></div>
       </section>
       <div className="divider" onPointerDown={(e)=>{e.currentTarget.setPointerCapture(e.pointerId); const move=(ev:PointerEvent)=>handlePointer(ev as unknown as React.PointerEvent<HTMLDivElement>); const up=()=>{e.currentTarget.removeEventListener('pointermove',move as any);e.currentTarget.removeEventListener('pointerup',up)};e.currentTarget.addEventListener('pointermove',move as any);e.currentTarget.addEventListener('pointerup',up)}}><span></span></div>
       <section className="pane document-pane">
-        <div className="pane-head"><div><span className="eyebrow">02 · {workspaceMode==='quick' ? 'QUICK OUTPUT' : 'PROFESSIONAL DOCUMENT'}</span><h2>{workspaceMode==='quick' ? 'Quick Note' : document.title}</h2></div><div className="document-head-actions">{workspaceMode==='professional' && <button className="copy-button" type="button" disabled={copyState !== 'Copy to Clipboard'} onClick={async()=>{setCopyState('Copying…'); try { await copyDocumentToClipboard(document); setCopyState('Copied'); setStatus('Formatted document copied'); window.setTimeout(()=>setCopyState('Copy to Clipboard'),1800) } catch (e) { setCopyState('Copy failed'); setStatus('Copy failed: ' + (e as Error).message); window.setTimeout(()=>setCopyState('Copy to Clipboard'),2200) }}}>{copyState}</button>}<span className="live-dot">● LIVE</span></div></div>
-        {workspaceMode==='professional' && profession==='doctor' && <div className="clinical-notice"><strong>{professionLocked === null ? 'Preview. Use fictional notes only. Do not enter real patient data.' : 'Documentation aid only. Not clinical advice. The clinician is responsible for the content.'}</strong>{professionLocked === null && <span>Documentation aid only. Not clinical advice. The clinician is responsible for the content.</span>}<small>{privateMode ? 'Private mode: notes are structured on this device. No AI request is made.' : `Notes are sent to ${document.provider_name} to generate the document.`}</small></div>}
-        {workspaceMode==='professional' && document.needs_input.length > 0 && <div className="needs"><strong>Needs your input</strong>{document.needs_input.map(item => <button key={item.id + item.question} type="button" onClick={()=>{if(item.section_id){setFocused(item.section_id); window.requestAnimationFrame(()=>{const area=window.document.querySelector('[data-section-id="' + item.section_id + '"]') as HTMLTextAreaElement | null; area?.focus(); area?.scrollIntoView({behavior:'smooth',block:'center'})})}}}>{item.question}</button>)}</div>}
-        {workspaceMode==='quick' ? <article className="document quick-output"><div className="doc-title">Quick Note</div><div className="doc-rule"></div><textarea value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Your note will appear here." /><small>Plain output · no professional structure applied</small></article> : <article className="document">
+        <div className="pane-head"><div><span className="eyebrow">02 · CLINICAL RECORD</span><h2>{document.title}</h2></div><div className="document-head-actions">{<button className="copy-button" type="button" disabled={copyState !== 'Copy to Clipboard'} onClick={async()=>{setCopyState('Copying…'); try { await copyDocumentToClipboard(document); setCopyState('Copied'); setStatus('Formatted document copied'); window.setTimeout(()=>setCopyState('Copy to Clipboard'),1800) } catch (e) { setCopyState('Copy failed'); setStatus('Copy failed: ' + (e as Error).message); window.setTimeout(()=>setCopyState('Copy to Clipboard'),2200) }}}>{copyState}</button>}<span className="live-dot">● LIVE</span></div></div>
+        <div className="clinical-notice"><strong>{professionLocked === null ? 'Preview. Use fictional notes only. Do not enter real patient data.' : 'Documentation aid only. Not clinical advice. The clinician is responsible for the content.'}</strong>{professionLocked === null && <span>Documentation aid only. Not clinical advice. The clinician is responsible for the content.</span>}<small>{privateMode ? 'Private mode: notes are structured on this device. No AI request is made.' : `Notes are sent to ${document.provider_name} to generate the document.`}</small></div>}
+        {document.needs_input.length > 0 && <div className="needs"><strong>Needs your input</strong>{document.needs_input.map(item => <button key={item.id + item.question} type="button" onClick={()=>{if(item.section_id){setFocused(item.section_id); window.requestAnimationFrame(()=>{const area=window.document.querySelector('[data-section-id="' + item.section_id + '"]') as HTMLTextAreaElement | null; area?.focus(); area?.scrollIntoView({behavior:'smooth',block:'center'})})}}}>{item.question}</button>)}</div>}
+        <article className="document">
           <div className="doc-title">{document.title}</div>
           <div className="doc-rule"></div>
           {document.sections.map(section => {
@@ -795,9 +822,13 @@ function App() {
               {focusedSection===section.id && !isLocked && <small>Editing · changes lock this field against later AI updates</small>}
             </section>
           })}
-        </article>}
-          {workspaceMode==='professional' && document.unplaced.length > 0 && <div className="unplaced"><strong>Unplaced from your notes</strong>{document.unplaced.map((item, index)=><span key={index}>{item}</span>)}</div>}
-          {workspaceMode==='professional' && document.warnings.length > 0 && <div className="warnings-summary"><strong>Review warnings</strong>{document.warnings.map((warning,index)=><span key={index}>{warning.message}</span>)}</div>}
+        </article>
+          {document.unplaced.length > 0 && <div className="unplaced"><strong>Unplaced from your notes</strong>{document.unplaced.map((item, index)=><span key={index}>{item}</span>)}</div>}
+          {document.warnings.length > 0 && <div className="warnings-summary"><strong>Review warnings</strong>{document.warnings.map((warning,index)=><span key={index}>{warning.message}</span>)}</div>}
+          <div className="finish-bar">
+            <div><strong>{encounterComplete ? 'Encounter ready to finish' : 'Before you finish'}</strong><span>Check the structured record against your notes. Ada does not replace clinical judgement.</span></div>
+            <div className="finish-actions"><button type="button" onClick={()=>setWorkflowStep('review')}>Review record</button><button type="button" className="finish-primary" onClick={markReviewComplete}>Mark reviewed</button></div>
+          </div>
       </section>
     </section>
     <footer><span>Ada. &nbsp; 2026. &nbsp; made with ❤️ in 🇳🇬.</span><span className="footer-privacy">{privateMode ? 'Private mode · on-device' : 'AI mode · provider processing applies'}</span></footer>

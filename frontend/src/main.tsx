@@ -128,7 +128,6 @@ function exportBaseName(document: DocumentState): string {
   return `Ada_${safeFilePart(document.title)}_${date}`
 }
 
-function normalizeDocument(document: any): DocumentState {
 type SpeechRecognitionInstance = {
   continuous: boolean
   interimResults: boolean
@@ -189,6 +188,8 @@ function localStructureDocument(profession: Profession, notes: string): Document
 }
 
 
+
+function normalizeDocument(document: any): DocumentState {
   return {
     title: String(document?.title || 'Professional Document'),
     sections: Array.isArray(document?.sections) ? document.sections.map((section: any) => ({ id: String(section?.id || ''), label: String(section?.label || ''), content: String(section?.content || '') })) : [],
@@ -199,6 +200,7 @@ function localStructureDocument(profession: Profession, notes: string): Document
     provider_name: String(document?.provider_name || 'local demo'),
   }
 }
+
 
 function documentExportText(document: DocumentState): Array<{ label: string; content: string }> {
   return document.sections.filter(section => section.content.trim()).map(section => ({ label: section.label, content: section.content.trim() }))

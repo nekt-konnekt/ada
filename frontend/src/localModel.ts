@@ -86,7 +86,7 @@ export async function localModelStructure(profession: Profession, notes: string,
   ]
   const output = await generator(messages, { max_new_tokens: 900, do_sample: false })
   const generated = output?.[0]?.generated_text
-  const text = Array.isArray(generated) ? generated.at(-1)?.content || '' : String(generated || '')
+  const text = Array.isArray(generated) ? generated[generated.length - 1]?.content || '' : String(generated || '')
   const parsed = extractJson(text)
   if (!parsed) throw new Error('Local model returned an unreadable draft')
   const fallback = blank(profession)

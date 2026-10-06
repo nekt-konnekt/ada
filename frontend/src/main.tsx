@@ -734,14 +734,15 @@ function App() {
     }
     timer.current = window.setTimeout(async () => {
       if (!generationCharged.current) { if (!requireFreeUse('professional', 'Professional Document')) return; generationCharged.current = true }
-      request.current?.abort(); request.current = new AbortController(); setStatus(privateMode ? 'Structuring privately…' : 'Updating…')
+      request.current?.abort(); request.current = new AbortController()
+      const localDraft = localStructureDocument(profession, notes)
+      const currentLocal = useAda.getState()
+      const mergedLocal = { ...localDraft, sections: localDraft.sections.map(section => { const currentSection = currentLocal.document.sections.find(item => item.id === section.id); return currentLocal.lockedSections.has(section.id) && currentSection ? currentSection : section }) }
+      setDocument(mergedLocal)
+      setWorkflowStep('structure')
+      setStatus(privateMode ? 'Private mode · nothing sent to AI' : 'Local draft · refining online…')
       try {
         if (privateMode) {
-          const next = localStructureDocument(profession, notes)
-          const current = useAda.getState()
-          const merged = { ...next, sections: next.sections.map(section => { const currentSection = current.document.sections.find(item => item.id === section.id); return current.lockedSections.has(section.id) && currentSection ? currentSection : section }) }
-          setDocument(merged)
-          setStatus('Private mode · nothing sent to AI')
           return
         }
         const r = await fetch('/api/structure', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({profession, notes, current_document:document}), signal:request.current.signal })

@@ -427,11 +427,10 @@ function App() {
   const setNotes = useAda(s=>s.setNotes), setProfession=useAda(s=>s.setProfession), setDocument=useAda(s=>s.setDocument)
   const setFocused=useAda(s=>s.setFocused), editSection=useAda(s=>s.editSection), unlockSection=useAda(s=>s.unlockSection)
   const [status, setStatus] = useState('Ready')
+  const [isOnline, setIsOnline] = useState(() => navigator.onLine)
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>('professional')
   const [professionLocked, setProfessionLocked] = useState<Profession>('doctor')
   const [split, setSplit] = useState(50)
-  const [workflowStep, setWorkflowStep] = useState<'capture' | 'structure' | 'review' | 'finish'>('capture')
-  const [encounterComplete, setEncounterComplete] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [history, setHistory] = useState<SavedNote[]>([])
   const [saveState, setSaveState] = useState('Save Note')
@@ -455,6 +454,11 @@ function App() {
   const request = useRef<AbortController | null>(null)
 
   useEffect(() => {
+    const goOnline = () => { setIsOnline(true); setStatus('Online · ready') }
+    const goOffline = () => { setIsOnline(false); setPrivateMode(true); localStorage.setItem('ada-private-mode', 'true'); setStatus('Offline · private mode') }
+    window.addEventListener('online', goOnline)
+    window.addEventListener('offline', goOffline)
+    if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {})
     listLocalNotes().then(setHistory).catch(() => setStatus('Local history unavailable'))
     const savedProfession = localStorage.getItem(PROFESSION_KEY) as Profession | null
     if (savedProfession === 'doctor' || savedProfession === 'lawyer') { setProfessionLocked(savedProfession); setProfession(savedProfession) }
@@ -693,15 +697,11 @@ function App() {
 
   function startNewEncounter() {
     useAda.setState({ profession: 'doctor', notes: '', document: emptyDoc('doctor'), focusedSection: null, lockedSections: new Set<string>() })
-    setWorkflowStep('capture')
-    setEncounterComplete(false)
-    setStatus('New clinical encounter')
+    setStatus('New clinical note')
   }
 
   function markReviewComplete() {
-    setEncounterComplete(true)
-    setWorkflowStep('finish')
-    setStatus(document.needs_input.length ? 'Reviewed · resolve the remaining questions before filing' : 'Ready to finish · clinician review complete')
+    setStatus(document.needs_input.length ? 'Reviewed · resolve the remaining questions before filing' : 'Reviewed · ready to export')
   }
 
   useEffect(() => {
@@ -719,6 +719,8 @@ function App() {
     const frame = window.requestAnimationFrame(resizeScribbleCanvas)
     window.addEventListener('resize', resizeScribbleCanvas)
     return () => {
+      window.removeEventListener('online', goOnline)
+      window.removeEventListener('offline', goOffline)
       window.cancelAnimationFrame(frame)
       window.removeEventListener('resize', resizeScribbleCanvas)
     }
@@ -739,10 +741,9 @@ function App() {
       const currentLocal = useAda.getState()
       const mergedLocal = { ...localDraft, sections: localDraft.sections.map(section => { const currentSection = currentLocal.document.sections.find(item => item.id === section.id); return currentLocal.lockedSections.has(section.id) && currentSection ? currentSection : section }) }
       setDocument(mergedLocal)
-      setWorkflowStep('structure')
-      setStatus(privateMode ? 'Private mode · nothing sent to AI' : 'Local draft · refining online…')
+      setStatus(privateMode || !isOnline ? 'Private mode · on-device structuring' : 'Local draft · refining online…')
       try {
-        if (privateMode) {
+        if (privateMode || !isOnline) {
           return
         }
         const r = await fetch('/api/structure', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({profession, notes, current_document:document}), signal:request.current.signal })
@@ -757,13 +758,13 @@ function App() {
         const next = normalizeDocument(await r.json())
         const current = useAda.getState()
         const merged = { ...next, sections: next.sections.map(section => { const currentSection = current.document.sections.find(item => item.id === section.id); return current.lockedSections.has(section.id) && currentSection ? currentSection : section }) }
-        setDocument(merged); setWorkflowStep('structure'); setStatus(next.provider === 'local-demo' ? 'Local demo engine' : 'Live: ' + next.provider)
+        setDocument(merged); setStatus(next.provider === 'local-demo' ? 'Local demo engine' : 'Live: ' + next.provider)
       } catch (e) {
         if ((e as Error).name !== 'AbortError') setStatus('Could not update: ' + (e as Error).message)
       }
     }, 650)
     return () => window.clearTimeout(timer.current)
-  }, [notes, profession, workspaceMode])
+  }, [notes, profession, workspaceMode, privateMode, isOnline])
 
   function handlePointer(e: React.PointerEvent<HTMLDivElement>) {
     const parent = e.currentTarget.parentElement?.getBoundingClientRect(); if (!parent) return
@@ -778,7 +779,7 @@ function App() {
         <button type="button" className={privateMode ? 'private-toggle active' : 'private-toggle'} onClick={togglePrivateMode} title="Private mode keeps structuring on this device and does not call the AI API">◉ {privateMode ? 'Private' : 'Online AI'}</button>
         <span className="usage-pill">{isProfessionalPlan() ? 'Professional · unlimited' : 'Free · ' + usage.professional + '/10 docs'}</span>
       </div>
-      <div className="status"><i></i>{status}</div>
+      <div className="status"><i></i>{isOnline ? status : "Offline · Private mode"}</div>
     </header>
     <section className="workspace" style={{gridTemplateColumns:`${split}% 8px ${100-split}%`}}>
       <section className="pane notes-pane">
@@ -789,7 +790,7 @@ function App() {
           <canvas ref={scribbleCanvas} className="scribble-canvas" onPointerDown={startScribble} onPointerMove={moveScribble} onPointerUp={endScribble} onPointerCancel={endScribble} aria-label="Handwriting input area" />
           <small className="scribble-note">Handwriting is converted into your notes. Ada structures the converted text, not the drawing itself.</small>
         </div> : <textarea autoFocus value={notes} onChange={e=>{const value=e.target.value; if (workspaceMode==='quick' && !notes.trim() && value.trim() && !requireFreeUse('quick','Quick Note')) return; setNotes(value)}} placeholder={profession==='doctor' ? 'Start scribbling…\n\npatient came in complaining of chest pain since yesterday…' : 'Start scribbling…\n\nclient was driving home when the other vehicle…'} />}
-        <div className="note-foot"><span>{encounterComplete ? 'Ready to finish' : 'Draft · saved locally'}</span><div className="note-actions"><button className="menu-button" aria-label="Note actions" title="Note actions" aria-expanded={actionsOpen} onClick={()=>setActionsOpen(value=>!value)}><span className="hamburger-icon" aria-hidden="true"><i></i><i></i><i></i></span></button>{actionsOpen && <div className="actions-menu"><input ref={fileInput} className="scan-input" type="file" accept="image/*" capture="environment" onChange={e=>{const file=e.target.files?.[0]; if(file) { void handleScan(file); setActionsOpen(false) }}} /><button className="menu-item" onClick={()=>fileInput.current?.click()}>{scanState}</button><button className="menu-item menu-save" onClick={()=>{void handleSave(); setActionsOpen(false)}}>{saveState === 'Save Note' ? 'Save Draft' : saveState}</button><button className="menu-item" disabled={workspaceMode !== 'professional' || exportState !== 'idle' || !isProfessionalPlan()} title={!isProfessionalPlan() ? 'Professional plan required' : undefined} onClick={async()=>{setExportState('docx'); setStatus('Preparing DOCX…'); try { await exportDocx(document); setStatus('DOCX saved to device') } catch (e) { setStatus('DOCX export failed: ' + (e as Error).message) } finally { setExportState('idle'); setActionsOpen(false) }}}>{exportState === 'docx' ? 'Preparing…' : 'Save as DOCX'}</button><button className="menu-item" disabled={workspaceMode !== 'professional' || exportState !== 'idle' || !isProfessionalPlan()} title={!isProfessionalPlan() ? 'Professional plan required' : undefined} onClick={()=>{setExportState('pdf'); setStatus('Preparing PDF…'); try { exportPdf(document); setStatus('PDF saved to device') } catch (e) { setStatus('PDF export failed: ' + (e as Error).message) } finally { setExportState('idle'); setActionsOpen(false) }}}>{exportState === 'pdf' ? 'Preparing…' : 'Save as PDF'}</button><button className="menu-item" onClick={()=>{setNotes(''); setActionsOpen(false)}}>Clear</button></div>}</div></div>
+        <div className="note-foot"><span>{isOnline ? 'Draft · saved locally' : 'Offline · saved locally'}</span><div className="note-actions"><button className="menu-button" aria-label="Note actions" title="Note actions" aria-expanded={actionsOpen} onClick={()=>setActionsOpen(value=>!value)}><span className="hamburger-icon" aria-hidden="true"><i></i><i></i><i></i></span></button>{actionsOpen && <div className="actions-menu"><input ref={fileInput} className="scan-input" type="file" accept="image/*" capture="environment" onChange={e=>{const file=e.target.files?.[0]; if(file) { void handleScan(file); setActionsOpen(false) }}} /><button className="menu-item" onClick={()=>fileInput.current?.click()}>{scanState}</button><button className="menu-item menu-save" onClick={()=>{void handleSave(); setActionsOpen(false)}}>{saveState === 'Save Note' ? 'Save Draft' : saveState}</button><button className="menu-item" disabled={workspaceMode !== 'professional' || exportState !== 'idle' || !isProfessionalPlan()} title={!isProfessionalPlan() ? 'Professional plan required' : undefined} onClick={async()=>{setExportState('docx'); setStatus('Preparing DOCX…'); try { await exportDocx(document); setStatus('DOCX saved to device') } catch (e) { setStatus('DOCX export failed: ' + (e as Error).message) } finally { setExportState('idle'); setActionsOpen(false) }}}>{exportState === 'docx' ? 'Preparing…' : 'Save as DOCX'}</button><button className="menu-item" disabled={workspaceMode !== 'professional' || exportState !== 'idle' || !isProfessionalPlan()} title={!isProfessionalPlan() ? 'Professional plan required' : undefined} onClick={()=>{setExportState('pdf'); setStatus('Preparing PDF…'); try { exportPdf(document); setStatus('PDF saved to device') } catch (e) { setStatus('PDF export failed: ' + (e as Error).message) } finally { setExportState('idle'); setActionsOpen(false) }}}>{exportState === 'pdf' ? 'Preparing…' : 'Save as PDF'}</button><button className="menu-item" onClick={()=>{setNotes(''); setActionsOpen(false)}}>Clear</button></div>}</div></div>
       </section>
       <div className="divider" onPointerDown={(e)=>{e.currentTarget.setPointerCapture(e.pointerId); const move=(ev:PointerEvent)=>handlePointer(ev as unknown as React.PointerEvent<HTMLDivElement>); const up=()=>{e.currentTarget.removeEventListener('pointermove',move as any);e.currentTarget.removeEventListener('pointerup',up)};e.currentTarget.addEventListener('pointermove',move as any);e.currentTarget.addEventListener('pointerup',up)}}><span></span></div>
       <section className="pane document-pane">
@@ -811,10 +812,7 @@ function App() {
         </article>
           {document.unplaced.length > 0 && <div className="unplaced"><strong>Unplaced from your notes</strong>{document.unplaced.map((item, index)=><span key={index}>{item}</span>)}</div>}
           {document.warnings.length > 0 && <div className="warnings-summary"><strong>Review warnings</strong>{document.warnings.map((warning,index)=><span key={index}>{warning.message}</span>)}</div>}
-          <div className="finish-bar">
-            <div><strong>{encounterComplete ? 'Encounter ready to finish' : 'Before you finish'}</strong><span>Check the structured record against your notes. Ada does not replace clinical judgement.</span></div>
-            <div className="finish-actions"><button type="button" onClick={()=>setWorkflowStep('review')}>Review record</button><button type="button" className="finish-primary" onClick={markReviewComplete}>Mark reviewed</button></div>
-          </div>
+
       </section>
     </section>
     <footer><span>Ada. &nbsp; 2026. &nbsp; made with ❤️ in 🇳🇬.</span><span className="footer-privacy">{privateMode ? 'Private mode · on-device' : 'AI mode · provider processing applies'}</span></footer>

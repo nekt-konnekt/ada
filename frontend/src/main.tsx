@@ -129,6 +129,66 @@ function exportBaseName(document: DocumentState): string {
 }
 
 function normalizeDocument(document: any): DocumentState {
+type SpeechRecognitionInstance = {
+  continuous: boolean
+  interimResults: boolean
+  lang: string
+  start: () => void
+  stop: () => void
+  onresult: ((event: any) => void) | null
+  onend: (() => void) | null
+  onerror: ((event: any) => void) | null
+}
+type SpeechRecognitionConstructor = new () => SpeechRecognitionInstance
+
+function getSpeechRecognition(): SpeechRecognitionConstructor | null {
+  const w = window as any
+  return (w.SpeechRecognition || w.webkitSpeechRecognition || null) as SpeechRecognitionConstructor | null
+}
+
+function localStructureDocument(profession: Profession, notes: string): DocumentState {
+  const sentences = notes.split(/(?<=[.!?])\\s+|\\n+/).map(s => s.trim()).filter(Boolean)
+  const bucket = (keywords: string[]) => sentences.filter(s => keywords.some(k => s.toLowerCase().includes(k))).join(' ')
+  if (profession === 'doctor') {
+    const used = new Set<string>()
+    const pick = (keywords: string[]) => {
+      const found = sentences.filter(s => keywords.some(k => s.toLowerCase().includes(k)))
+      found.forEach(x => used.add(x))
+      return found.join(' ')
+    }
+    const sections = [
+      {id:'chief_complaint',label:'Chief Complaint',content:pick(['complain','presenting','came in','here for','pain','headache','cough'])},
+      {id:'history',label:'History of Present Illness',content:pick(['since','for ','worse','better','history','reports','started','yesterday','today'])},
+      {id:'history_social_family',label:'Past / Social / Family History',content:pick(['past medical','family history','social history','smokes','smoking','alcohol'])},
+      {id:'allergies',label:'Allergies',content:pick(['allerg','no known'])},
+      {id:'observations',label:'Observations / Vitals',content:pick(['bp','blood pressure','pulse','temperature','temp','weight','height','vital'])},
+      {id:'examination',label:'Examination Findings',content:pick(['exam','examination','tender','swelling','lungs','heart sounds'])},
+      {id:'investigations',label:'Investigations',content:pick(['x-ray','xray','mri','ct ','lab','test result','investigation'])},
+      {id:'assessment',label:'Assessment',content:pick(['assessment','diagnos','impression'])},
+      {id:'plan',label:'Plan',content:pick(['plan','prescrib','review','refer','start','continue','give'])},
+      {id:'follow_up',label:'Follow-up',content:pick(['follow-up','follow up','return','revisit'])},
+    ]
+    const unplaced = sentences.filter(s => !used.has(s))
+    return normalizeDocument({title:'Clinical Note',sections,needs_input:[],warnings:[],unplaced,provider:'local-device',provider_name:'on-device mode'})
+  }
+  const used = new Set<string>()
+  const pick = (keywords: string[]) => {
+    const found = sentences.filter(s => keywords.some(k => s.toLowerCase().includes(k)))
+    found.forEach(x => used.add(x)); return found.join(' ')
+  }
+  const sections = [
+    {id:'parties',label:'Parties',content:pick(['plaintiff','defendant','client','company','insurer','driver'])},
+    {id:'facts',label:'Facts / Incident Summary',content:pick(['incident','accident','happened','collision','drove','driving','occurred'])},
+    {id:'injuries',label:'Injuries / Damages',content:pick(['injury','injured','damage','pain','hospital','medical','loss'])},
+    {id:'liability',label:'Liability / Issues',content:pick(['liable','liability','fault','negligence','issue','claim'])},
+    {id:'authorities',label:'Authorities',content:pick(['act ','section ','case ','v.','regulation','statute'])},
+    {id:'evidence',label:'Supporting Information',content:pick(['witness','photo','police','report','document','record','evidence'])},
+    {id:'next_steps',label:'Next Steps',content:pick(['next','file','send','review','draft','follow up','meeting'])},
+  ]
+  return normalizeDocument({title:'Case Note',sections,needs_input:[],warnings:[],unplaced:sentences.filter(s=>!used.has(s)),provider:'local-device',provider_name:'on-device mode'})
+}
+
+
   return {
     title: String(document?.title || 'Professional Document'),
     sections: Array.isArray(document?.sections) ? document.sections.map((section: any) => ({ id: String(section?.id || ''), label: String(section?.label || ''), content: String(section?.content || '') })) : [],
@@ -377,6 +437,9 @@ function App() {
   const [copyState, setCopyState] = useState('Copy to Clipboard')
   const [gateMessage, setGateMessage] = useState('')
   const [usage, setUsage] = useState<Record<UsageKind, number>>(readUsage())
+  const [privateMode, setPrivateMode] = useState(() => localStorage.getItem('ada-private-mode') === 'true')
+  const [voiceState, setVoiceState] = useState<'idle' | 'listening'>('idle')
+  const speechRecognition = useRef<SpeechRecognitionInstance | null>(null)
   const generationCharged = useRef(false)
   const fileInput = useRef<HTMLInputElement | null>(null)
   const scribbleCanvas = useRef<HTMLCanvasElement | null>(null)
@@ -491,6 +554,49 @@ function App() {
   function refreshUsage() { setUsage(readUsage()) }
   function requireFreeUse(kind: UsageKind, label: string): boolean { const ok = consumeFreeUse(kind); refreshUsage(); if (!ok) { setGateMessage(`Free plan limit reached: ${label} is limited to 10 uses per month. Upgrade to Professional for unlimited use.`); return false } return true }
 
+
+  function togglePrivateMode() {
+    setPrivateMode(value => {
+      const next = !value
+      localStorage.setItem('ada-private-mode', String(next))
+      setStatus(next ? 'Private mode · on-device structuring' : 'Online AI mode')
+      return next
+    })
+  }
+
+  function toggleVoice() {
+    if (voiceState === 'listening') {
+      speechRecognition.current?.stop()
+      setVoiceState('idle')
+      setStatus('Voice stopped')
+      return
+    }
+    const Recognition = getSpeechRecognition()
+    if (!Recognition) {
+      setStatus('Voice input is not supported in this browser')
+      return
+    }
+    const recognition = new Recognition()
+    recognition.continuous = true
+    recognition.interimResults = false
+    recognition.lang = 'en-NG'
+    recognition.onresult = (event) => {
+      const transcript = Array.from(event.results as any[]).slice(event.resultIndex || 0)
+        .map((result: any) => result?.[0]?.transcript || '').join(' ').trim()
+      if (transcript) {
+        setNotes((useAda.getState().notes.trim() ? useAda.getState().notes.trim() + ' ' : '') + transcript)
+        setStatus('Voice captured')
+      }
+    }
+    recognition.onend = () => { speechRecognition.current = null; setVoiceState('idle') }
+    recognition.onerror = (event) => { speechRecognition.current = null; setVoiceState('idle'); setStatus('Voice error: ' + String(event?.error || 'unknown')) }
+    speechRecognition.current = recognition
+    setVoiceState('listening')
+    setStatus('Listening… speak naturally')
+    recognition.start()
+  }
+
+  useEffect(() => () => speechRecognition.current?.stop(), [])
   async function convertScribbleToNotes() {
     const canvas = scribbleCanvas.current
     if (!canvas || scribbleStrokes.current.length === 0) {
@@ -610,8 +716,16 @@ function App() {
     }
     timer.current = window.setTimeout(async () => {
       if (!generationCharged.current) { if (!requireFreeUse('professional', 'Professional Document')) return; generationCharged.current = true }
-      request.current?.abort(); request.current = new AbortController(); setStatus('Updating…')
+      request.current?.abort(); request.current = new AbortController(); setStatus(privateMode ? 'Structuring privately…' : 'Updating…')
       try {
+        if (privateMode) {
+          const next = localStructureDocument(profession, notes)
+          const current = useAda.getState()
+          const merged = { ...next, sections: next.sections.map(section => { const currentSection = current.document.sections.find(item => item.id === section.id); return current.lockedSections.has(section.id) && currentSection ? currentSection : section }) }
+          setDocument(merged)
+          setStatus('Private mode · nothing sent to AI')
+          return
+        }
         const r = await fetch('/api/structure', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({profession, notes, current_document:document}), signal:request.current.signal })
         if (!r.ok) {
           let detail = 'Request failed'
@@ -644,13 +758,17 @@ function App() {
         <button className={workspaceMode==='quick' ? 'active' : ''} onClick={()=>{setWorkspaceMode('quick');setStatus(notes.trim()?'Quick note':'Ready')}}>Quick Note</button>
         <button className={workspaceMode==='professional' ? 'active' : ''} onClick={()=>{setWorkspaceMode('professional');setStatus(notes.trim()?'Updating…':'Ready')}}>Professional Document</button>
       </div>
-      <span className="locked-mode">{professionLocked === null ? 'Clinical mode (preview)' : (profession==='doctor' ? 'Doctor' : 'Lawyer') + ' · locked'}</span>
+      <div className="workspace-controls">
+        <button type="button" className={privateMode ? 'private-toggle active' : 'private-toggle'} onClick={togglePrivateMode} title="Private mode keeps structuring on this device and does not call the AI API">◉ {privateMode ? 'Private' : 'Online AI'}</button>
+        <button type="button" className="profession-toggle" onClick={() => chooseProfession(profession === 'doctor' ? 'lawyer' : 'doctor')} title="Switch profession">{profession === 'doctor' ? 'Doctor' : 'Lawyer'} ↔</button>
+        <span className="usage-pill">{isProfessionalPlan() ? 'Professional · unlimited' : `Free · ${usage.professional}/10 docs`}</span>
+      </div>
       <div className="status"><i></i>{status}</div>
     </header>
     <section className="workspace" style={{gridTemplateColumns:`${split}% 8px ${100-split}%`}}>
       <section className="pane notes-pane">
         <div className="pane-head"><div><span className="eyebrow">01 · YOUR NOTES</span><h2 className="notes-heading">Write however you think.</h2></div><div className="head-actions"><span className="hint">{notes.length.toLocaleString()} chars</span><button className="history-button" onClick={()=>setHistoryOpen(true)}>History{history.length ? <b>{history.length}</b> : null}</button></div></div>
-        <div className="notes-input-mode"><button type="button" className={!scribbleMode ? 'active' : ''} onClick={()=>setScribbleMode(false)}>Type</button><button type="button" className={scribbleMode ? 'active' : ''} onClick={()=>{setScribbleMode(true); window.requestAnimationFrame(resizeScribbleCanvas)}}>Scribble</button></div>
+        <div className="notes-input-mode"><button type="button" className={!scribbleMode ? 'active' : ''} onClick={()=>setScribbleMode(false)}>Type</button><button type="button" className={scribbleMode ? 'active' : ''} onClick={()=>{setScribbleMode(true); window.requestAnimationFrame(resizeScribbleCanvas)}}>Scribble</button><button type="button" className={voiceState === 'listening' ? 'voice-button listening' : 'voice-button'} onClick={toggleVoice}>{voiceState === 'listening' ? '● Listening…' : '🎙 Voice'}</button></div>
         {scribbleMode ? <div className="scribble-wrap">
           <div className="scribble-toolbar"><span>Use Apple Pencil, stylus, or finger.</span><div><button type="button" onClick={undoScribble}>Undo</button><button type="button" onClick={clearScribble}>Clear</button><button type="button" className="scribble-convert" onClick={()=>{void convertScribbleToNotes()}}>{scribbleState}</button></div></div>
           <canvas ref={scribbleCanvas} className="scribble-canvas" onPointerDown={startScribble} onPointerMove={moveScribble} onPointerUp={endScribble} onPointerCancel={endScribble} aria-label="Handwriting input area" />
@@ -661,7 +779,7 @@ function App() {
       <div className="divider" onPointerDown={(e)=>{e.currentTarget.setPointerCapture(e.pointerId); const move=(ev:PointerEvent)=>handlePointer(ev as unknown as React.PointerEvent<HTMLDivElement>); const up=()=>{e.currentTarget.removeEventListener('pointermove',move as any);e.currentTarget.removeEventListener('pointerup',up)};e.currentTarget.addEventListener('pointermove',move as any);e.currentTarget.addEventListener('pointerup',up)}}><span></span></div>
       <section className="pane document-pane">
         <div className="pane-head"><div><span className="eyebrow">02 · {workspaceMode==='quick' ? 'QUICK OUTPUT' : 'PROFESSIONAL DOCUMENT'}</span><h2>{workspaceMode==='quick' ? 'Quick Note' : document.title}</h2></div><div className="document-head-actions">{workspaceMode==='professional' && <button className="copy-button" type="button" disabled={copyState !== 'Copy to Clipboard'} onClick={async()=>{setCopyState('Copying…'); try { await copyDocumentToClipboard(document); setCopyState('Copied'); setStatus('Formatted document copied'); window.setTimeout(()=>setCopyState('Copy to Clipboard'),1800) } catch (e) { setCopyState('Copy failed'); setStatus('Copy failed: ' + (e as Error).message); window.setTimeout(()=>setCopyState('Copy to Clipboard'),2200) }}}>{copyState}</button>}<span className="live-dot">● LIVE</span></div></div>
-        {workspaceMode==='professional' && profession==='doctor' && <div className="clinical-notice"><strong>{professionLocked === null ? 'Preview. Use fictional notes only. Do not enter real patient data.' : 'Documentation aid only. Not clinical advice. The clinician is responsible for the content.'}</strong>{professionLocked === null && <span>Documentation aid only. Not clinical advice. The clinician is responsible for the content.</span>}<small>Notes are sent to {document.provider_name} to generate the document.</small></div>}
+        {workspaceMode==='professional' && profession==='doctor' && <div className="clinical-notice"><strong>{professionLocked === null ? 'Preview. Use fictional notes only. Do not enter real patient data.' : 'Documentation aid only. Not clinical advice. The clinician is responsible for the content.'}</strong>{professionLocked === null && <span>Documentation aid only. Not clinical advice. The clinician is responsible for the content.</span>}<small>{privateMode ? 'Private mode: notes are structured on this device. No AI request is made.' : `Notes are sent to ${document.provider_name} to generate the document.`}</small></div>}
         {workspaceMode==='professional' && document.needs_input.length > 0 && <div className="needs"><strong>Needs your input</strong>{document.needs_input.map(item => <button key={item.id + item.question} type="button" onClick={()=>{if(item.section_id){setFocused(item.section_id); window.requestAnimationFrame(()=>{const area=window.document.querySelector('[data-section-id="' + item.section_id + '"]') as HTMLTextAreaElement | null; area?.focus(); area?.scrollIntoView({behavior:'smooth',block:'center'})})}}}>{item.question}</button>)}</div>}
         {workspaceMode==='quick' ? <article className="document quick-output"><div className="doc-title">Quick Note</div><div className="doc-rule"></div><textarea value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Your note will appear here." /><small>Plain output · no professional structure applied</small></article> : <article className="document">
           <div className="doc-title">{document.title}</div>
@@ -680,7 +798,7 @@ function App() {
           {workspaceMode==='professional' && document.warnings.length > 0 && <div className="warnings-summary"><strong>Review warnings</strong>{document.warnings.map((warning,index)=><span key={index}>{warning.message}</span>)}</div>}
       </section>
     </section>
-    <footer><span>Ada.            2026.            made with ❤️ in 🇳🇬.</span></footer>
+    <footer><span>Ada. &nbsp; 2026. &nbsp; made with ❤️ in 🇳🇬.</span><span className="footer-privacy">{privateMode ? 'Private mode · on-device' : 'AI mode · provider processing applies'}</span></footer>
     {gateMessage && <div className="lock-backdrop" onClick={()=>setGateMessage('')}><div className="lock-card" onClick={e=>e.stopPropagation()}><span className="eyebrow">ADA PROFESSIONAL</span><h2>Professional feature</h2><p>{gateMessage}</p><div className="lock-options"><button onClick={()=>{setGateMessage(''); goTo('/#pricing')}}><strong>View Professional</strong><span>Unlimited usage and professional exports.</span></button><button onClick={()=>setGateMessage('')}><strong>Keep using Free</strong><span>10 uses per feature each month.</span></button></div></div></div>}
     {historyOpen && <div className="history-backdrop" onClick={()=>setHistoryOpen(false)}>
       <aside className="history-panel" onClick={e=>e.stopPropagation()}>

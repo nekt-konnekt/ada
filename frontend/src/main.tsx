@@ -474,6 +474,10 @@ function App() {
         }
       }
     } catch {}
+    return () => {
+      window.removeEventListener('online', goOnline)
+      window.removeEventListener('offline', goOffline)
+    }
   }, [])
 
   useEffect(() => {
@@ -720,8 +724,6 @@ function App() {
     const frame = window.requestAnimationFrame(resizeScribbleCanvas)
     window.addEventListener('resize', resizeScribbleCanvas)
     return () => {
-      window.removeEventListener('online', goOnline)
-      window.removeEventListener('offline', goOffline)
       window.cancelAnimationFrame(frame)
       window.removeEventListener('resize', resizeScribbleCanvas)
     }

@@ -146,7 +146,7 @@ function getSpeechRecognition(): SpeechRecognitionConstructor | null {
 }
 
 function localStructureDocument(profession: Profession, notes: string): DocumentState {
-  const sentences = notes.split(/(?<=[.!?])\\s+|\\n+/).map(s => s.trim()).filter(Boolean)
+  const sentences = notes.split(/(?<=[.!?])\s+|\n+/).map(s => s.trim()).filter(Boolean)
   const bucket = (keywords: string[]) => sentences.filter(s => keywords.some(k => s.toLowerCase().includes(k))).join(' ')
   if (profession === 'doctor') {
     const used = new Set<string>()
@@ -582,7 +582,7 @@ function App() {
     recognition.continuous = true
     recognition.interimResults = false
     recognition.lang = 'en-NG'
-    recognition.onresult = (event) => {
+    recognition.onresult = (event: any) => {
       const transcript = Array.from(event.results as any[]).slice(event.resultIndex || 0)
         .map((result: any) => result?.[0]?.transcript || '').join(' ').trim()
       if (transcript) {
@@ -591,7 +591,7 @@ function App() {
       }
     }
     recognition.onend = () => { speechRecognition.current = null; setVoiceState('idle') }
-    recognition.onerror = (event) => { speechRecognition.current = null; setVoiceState('idle'); setStatus('Voice error: ' + String(event?.error || 'unknown')) }
+    recognition.onerror = (event: any) => { speechRecognition.current = null; setVoiceState('idle'); setStatus('Voice error: ' + String(event?.error || 'unknown')) }
     speechRecognition.current = recognition
     setVoiceState('listening')
     setStatus('Listening… speak naturally')

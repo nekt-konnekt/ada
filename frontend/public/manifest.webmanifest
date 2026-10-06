@@ -1,0 +1,9 @@
+{
+  "name": "Ada — Clinical Documentation",
+  "short_name": "Ada",
+  "start_url": "/0.1",
+  "display": "standalone",
+  "background_color": "#E8DFF8",
+  "theme_color": "#E8DFF8",
+  "description": "Local-first clinical documentation workspace."
+}

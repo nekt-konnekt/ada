@@ -4,6 +4,7 @@ import { create } from 'zustand'
 import { Document, HeadingLevel, Packer, Paragraph, TextRun } from 'docx'
 import { jsPDF } from 'jspdf'
 import { PaddleOCR } from '@paddleocr/paddleocr-js'
+import { localModelStructure } from './localModel'
 import './styles.css'
 
 type Profession = 'doctor' | 'lawyer'
@@ -737,13 +738,18 @@ function App() {
     timer.current = window.setTimeout(async () => {
       if (!generationCharged.current) { if (!requireFreeUse('professional', 'Professional Document')) return; generationCharged.current = true }
       request.current?.abort(); request.current = new AbortController()
-      const localDraft = localStructureDocument(profession, notes)
       const currentLocal = useAda.getState()
+      const localDraft = localStructureDocument(profession, notes)
       const mergedLocal = { ...localDraft, sections: localDraft.sections.map(section => { const currentSection = currentLocal.document.sections.find(item => item.id === section.id); return currentLocal.lockedSections.has(section.id) && currentSection ? currentSection : section }) }
       setDocument(mergedLocal)
-      setStatus(privateMode || !isOnline ? 'Private mode · on-device structuring' : 'Local draft · refining online…')
+      setStatus(privateMode || !isOnline ? 'Private mode · local AI starting…' : 'Local draft · refining online…')
       try {
         if (privateMode || !isOnline) {
+          const localAi = await localModelStructure(profession, notes, message => setStatus(message))
+          const latest = useAda.getState()
+          const mergedAi = { ...localAi, sections: localAi.sections.map(section => { const currentSection = latest.document.sections.find(item => item.id === section.id); return latest.lockedSections.has(section.id) && currentSection ? currentSection : section }) }
+          setDocument(mergedAi)
+          setStatus('Private · local AI')
           return
         }
         const r = await fetch('/api/structure', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({profession, notes, current_document:document}), signal:request.current.signal })

@@ -699,14 +699,9 @@ function App() {
   }
 
   function markReviewComplete() {
-    if (document.sections.some(section => !section.content.trim())) {
-      setStatus('Review the empty fields before finishing')
-      setWorkflowStep('review')
-      return
-    }
     setEncounterComplete(true)
     setWorkflowStep('finish')
-    setStatus('Ready to finish · clinician review complete')
+    setStatus(document.needs_input.length ? 'Reviewed · resolve the remaining questions before filing' : 'Ready to finish · clinician review complete')
   }
 
   useEffect(() => {
@@ -808,7 +803,7 @@ function App() {
       <div className="divider" onPointerDown={(e)=>{e.currentTarget.setPointerCapture(e.pointerId); const move=(ev:PointerEvent)=>handlePointer(ev as unknown as React.PointerEvent<HTMLDivElement>); const up=()=>{e.currentTarget.removeEventListener('pointermove',move as any);e.currentTarget.removeEventListener('pointerup',up)};e.currentTarget.addEventListener('pointermove',move as any);e.currentTarget.addEventListener('pointerup',up)}}><span></span></div>
       <section className="pane document-pane">
         <div className="pane-head"><div><span className="eyebrow">02 · CLINICAL RECORD</span><h2>{document.title}</h2></div><div className="document-head-actions">{<button className="copy-button" type="button" disabled={copyState !== 'Copy to Clipboard'} onClick={async()=>{setCopyState('Copying…'); try { await copyDocumentToClipboard(document); setCopyState('Copied'); setStatus('Formatted document copied'); window.setTimeout(()=>setCopyState('Copy to Clipboard'),1800) } catch (e) { setCopyState('Copy failed'); setStatus('Copy failed: ' + (e as Error).message); window.setTimeout(()=>setCopyState('Copy to Clipboard'),2200) }}}>{copyState}</button>}<span className="live-dot">● LIVE</span></div></div>
-        <div className="clinical-notice"><strong>{professionLocked === null ? 'Preview. Use fictional notes only. Do not enter real patient data.' : 'Documentation aid only. Not clinical advice. The clinician is responsible for the content.'}</strong>{professionLocked === null && <span>Documentation aid only. Not clinical advice. The clinician is responsible for the content.</span>}<small>{privateMode ? 'Private mode: notes are structured on this device. No AI request is made.' : `Notes are sent to ${document.provider_name} to generate the document.`}</small></div>}
+        <div className="clinical-notice"><strong>{professionLocked === null ? 'Preview. Use fictional notes only. Do not enter real patient data.' : 'Documentation aid only. Not clinical advice. The clinician is responsible for the content.'}</strong>{professionLocked === null && <span>Documentation aid only. Not clinical advice. The clinician is responsible for the content.</span>}<small>{privateMode ? 'Private mode: notes are structured on this device. No AI request is made.' : `Notes are sent to ${document.provider_name} to generate the document.`}</small></div>
         {document.needs_input.length > 0 && <div className="needs"><strong>Needs your input</strong>{document.needs_input.map(item => <button key={item.id + item.question} type="button" onClick={()=>{if(item.section_id){setFocused(item.section_id); window.requestAnimationFrame(()=>{const area=window.document.querySelector('[data-section-id="' + item.section_id + '"]') as HTMLTextAreaElement | null; area?.focus(); area?.scrollIntoView({behavior:'smooth',block:'center'})})}}}>{item.question}</button>)}</div>}
         <article className="document">
           <div className="doc-title">{document.title}</div>

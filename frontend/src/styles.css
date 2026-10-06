@@ -191,3 +191,21 @@ footer .usage-limits,footer .plan-limits,footer [class*="usage"],footer [class*=
 @media(max-width:800px){
   .scribble-canvas{height:620px;min-height:620px;flex:0 0 620px}
 }
+
+
+/* Ada workflow controls: privacy, profession and voice */
+.workspace-controls{display:flex;align-items:center;gap:8px;margin-left:auto}
+.workspace-controls button,.usage-pill{font:inherit;font-size:11px;line-height:1;padding:9px 11px;border:1px solid #E2E8F0;border-radius:999px;background:#FFFFFF;color:#334155;white-space:nowrap}
+.workspace-controls button{cursor:pointer}
+.private-toggle.active{background:#ECFDF5;border-color:#86EFAC;color:#166534}
+.voice-button.listening{background:#FEF2F2!important;border-color:#FCA5A5!important;color:#B91C1C!important}
+.usage-pill{color:#64748B}
+.footer-privacy{margin-left:12px}
+@media(max-width:800px){
+  .workspace-controls{width:100%;margin:4px 0 0;justify-content:flex-end;overflow:auto}
+  .usage-pill{display:none}
+  .topbar{flex-wrap:wrap}
+  .status{margin-left:auto}
+  .notes-input-mode{overflow-x:auto}
+  .notes-input-mode button{white-space:nowrap}
+}

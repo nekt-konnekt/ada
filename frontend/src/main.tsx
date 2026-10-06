@@ -780,16 +780,6 @@ function App() {
       </div>
       <div className="status"><i></i>{status}</div>
     </header>
-    <nav className="workflow-bar" aria-label="Clinical documentation workflow">
-      <div className={workflowStep === 'capture' ? 'workflow-step active' : 'workflow-step'}><span>1</span><strong>Capture</strong><small>Talk, type or scan</small></div>
-      <div className="workflow-line"></div>
-      <div className={workflowStep === 'structure' ? 'workflow-step active' : 'workflow-step'}><span>2</span><strong>Structure</strong><small>Ada organises the note</small></div>
-      <div className="workflow-line"></div>
-      <div className={workflowStep === 'review' ? 'workflow-step active' : 'workflow-step'}><span>3</span><strong>Review</strong><small>You verify every field</small></div>
-      <div className="workflow-line"></div>
-      <div className={workflowStep === 'finish' ? 'workflow-step active' : 'workflow-step'}><span>4</span><strong>Finish</strong><small>Save or export</small></div>
-      <button className="new-encounter-button" type="button" onClick={startNewEncounter}>+ New encounter</button>
-    </nav>
     <section className="workspace" style={{gridTemplateColumns:`${split}% 8px ${100-split}%`}}>
       <section className="pane notes-pane">
         <div className="pane-head"><div><span className="eyebrow">01 · CAPTURE</span><h2 className="notes-heading">Write however you think.</h2></div><div className="head-actions"><span className="hint">{notes.length.toLocaleString()} chars</span><button className="history-button" onClick={()=>setHistoryOpen(true)}>History{history.length ? <b>{history.length}</b> : null}</button></div></div>

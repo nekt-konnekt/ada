@@ -1,18 +1,55 @@
 import React, { useEffect, useRef, useState } from 'react'
+import Onboarding, { loadPersona, PERSONA_KEY, savePersona, type PersonaProfile } from './Onboarding'
 import { createRoot } from 'react-dom/client'
 import { create } from 'zustand'
 import { Document, HeadingLevel, Packer, Paragraph, TextRun } from 'docx'
 import { jsPDF } from 'jspdf'
 import { PaddleOCR } from '@paddleocr/paddleocr-js'
 import { localModelStructure } from './localModel'
+import { accountCanGenerate, buildTemplateDraft, generationTriggerKey, getSafeStorage, isLatestSessionResponse, mergeLockedSections, safeStorageGet, safeStorageRemove, safeStorageSet } from './workspaceLogic'
 import './styles.css'
 
-type Profession = 'doctor' | 'lawyer'
+let restoredDraftPending = false
+type Profession = string
+type TemplateInfo = { id: string; name: string; version: number; profession: string; profession_label: string; document_kind: string; custom: boolean; sections: { id: string; label: string; field_kind: string }[] }
+const TEMPLATES: TemplateInfo[] = []
+async function loadTemplates(): Promise<TemplateInfo[]> {
+  if (TEMPLATES.length) return TEMPLATES
+  try {
+    const r = await fetch('/api/templates')
+    if (r.ok) {
+      const body = await r.json()
+      TEMPLATES.length = 0
+      TEMPLATES.push(...(body.templates as TemplateInfo[]))
+    }
+  } catch {}
+  return TEMPLATES
+}
+function templateFor(profession: Profession): TemplateInfo | null {
+  return TEMPLATES.find(t => t.profession === (profession || '').toLowerCase()) || TEMPLATES.find(t => t.profession === 'generic') || null
+}
+
+// document shape for a profession — template registry first, legacy fallback
+const LEGACY_SECTIONS: Record<Profession, {id:string;label:string}[]> = {
+  doctor: [
+    {id:'chief_complaint',label:'Chief Complaint'},{id:'history',label:'History of Present Illness'},
+    {id:'history_social_family',label:'Past / Social / Family History'},{id:'allergies',label:'Allergies'},
+    {id:'observations',label:'Observations / Vitals'},{id:'examination',label:'Examination Findings'},
+    {id:'investigations',label:'Investigations'},{id:'assessment',label:'Assessment'},
+    {id:'plan',label:'Plan'},{id:'follow_up',label:'Follow-up'}
+  ],
+  lawyer: [
+    {id:'parties',label:'Parties'},{id:'facts',label:'Facts / Incident Summary'},
+    {id:'injuries',label:'Injuries / Damages'},{id:'liability',label:'Liability / Issues'},
+    {id:'authorities',label:'Authorities'},{id:'evidence',label:'Supporting Information'},{id:'next_steps',label:'Next Steps'}
+  ]
+}
+const TITLES: Record<Profession, string> = { doctor: 'Clinical Note', lawyer: 'Case Note' }
 type Section = { id: string; label: string; content: string }
 type NeedInput = { id: string; question: string; section_id: string }
 type Warning = { section_id: string | null; message: string; token: string }
 type WorkspaceMode = 'quick' | 'professional'
-type DocumentState = { title: string; sections: Section[]; needs_input: NeedInput[]; warnings: Warning[]; unplaced: string[]; provider: string; provider_name: string }
+type DocumentState = { template_id?: string; title: string; sections: Section[]; needs_input: NeedInput[]; warnings: Warning[]; unplaced: string[]; provider: string; provider_name: string }
 type SavedNote = { id: string; profession: Profession; document: DocumentState; createdAt: string; updatedAt: string }
 
 const DB_NAME = 'ada-local';
@@ -23,10 +60,11 @@ const ONBOARDED_KEY = 'ada-onboarded';
 const USAGE_KEY = 'ada-usage-v1';
 const FREE_LIMIT = 10;
 type UsageKind = 'quick' | 'professional' | 'scan';
+function browserStorage() { return getSafeStorage(() => localStorage) }
 function usageMonth(): string { return new Date().toISOString().slice(0, 7) }
-function readUsage(): Record<UsageKind, number> { try { const raw = JSON.parse(localStorage.getItem(USAGE_KEY) || '{}'); if (raw.month !== usageMonth()) return { quick: 0, professional: 0, scan: 0 }; return { quick: Number(raw.quick) || 0, professional: Number(raw.professional) || 0, scan: Number(raw.scan) || 0 } } catch { return { quick: 0, professional: 0, scan: 0 } } }
-function saveUsage(usage: Record<UsageKind, number>) { localStorage.setItem(USAGE_KEY, JSON.stringify({ month: usageMonth(), ...usage })) }
-function isProfessionalPlan(): boolean { return localStorage.getItem('ada-plan') === 'professional' }
+function readUsage(): Record<UsageKind, number> { try { const raw = JSON.parse(safeStorageGet(browserStorage(), USAGE_KEY) || '{}'); if (raw.month !== usageMonth()) return { quick: 0, professional: 0, scan: 0 }; return { quick: Number(raw.quick) || 0, professional: Number(raw.professional) || 0, scan: Number(raw.scan) || 0 } } catch { return { quick: 0, professional: 0, scan: 0 } } }
+function saveUsage(usage: Record<UsageKind, number>) { safeStorageSet(browserStorage(), USAGE_KEY, JSON.stringify({ month: usageMonth(), ...usage })) }
+function isProfessionalPlan(): boolean { return safeStorageGet(browserStorage(), 'ada-plan') === 'professional' }
 function consumeFreeUse(kind: UsageKind): boolean { if (isProfessionalPlan()) return true; const usage = readUsage(); if (usage[kind] >= FREE_LIMIT) return false; usage[kind] += 1; saveUsage(usage); return true }
 
 function openNotesDb(): Promise<IDBDatabase> {
@@ -146,7 +184,24 @@ function getSpeechRecognition(): SpeechRecognitionConstructor | null {
   return (w.SpeechRecognition || w.webkitSpeechRecognition || null) as SpeechRecognitionConstructor | null
 }
 
+function toApiProfile(persona: PersonaProfile | null | undefined) {
+  if (!persona) return undefined
+  return {
+    profession: persona.profession,
+    profession_label: persona.profession_label,
+    industry: persona.industry,
+    specialty: persona.specialty,
+    use_cases: (persona.use_cases || '').split(/\n|,/).map(x => x.trim()).filter(Boolean),
+    language: persona.language || 'en',
+    notes_style: /concise/i.test(persona.doc_style || '') ? 'concise' : 'detailed',
+  }
+}
+
 function localStructureDocument(profession: Profession, notes: string): DocumentState {
+  const selectedTemplate = templateFor(profession)
+  if (profession !== 'doctor' && profession !== 'lawyer' && selectedTemplate) {
+    return normalizeDocument(buildTemplateDraft(selectedTemplate, notes))
+  }
   const sentences = notes.split(/(?<=[.!?])\s+|\n+/).map(s => s.trim()).filter(Boolean)
   const bucket = (keywords: string[]) => sentences.filter(s => keywords.some(k => s.toLowerCase().includes(k))).join(' ')
   if (profession === 'doctor') {
@@ -192,6 +247,7 @@ function localStructureDocument(profession: Profession, notes: string): Document
 
 function normalizeDocument(document: any): DocumentState {
   return {
+    template_id: typeof document?.template_id === 'string' ? document.template_id : undefined,
     title: String(document?.title || 'Professional Document'),
     sections: Array.isArray(document?.sections) ? document.sections.map((section: any) => ({ id: String(section?.id || ''), label: String(section?.label || ''), content: String(section?.content || '') })) : [],
     needs_input: Array.isArray(document?.needs_input) ? document.needs_input.map((item: any) => typeof item === 'string' ? { id: 'needs_input', question: item, section_id: '' } : { id: String(item?.id || 'needs_input'), question: String(item?.question || item?.text || ''), section_id: String(item?.section_id || '') }).filter((item: NeedInput) => item.question.trim()) : [],
@@ -379,22 +435,22 @@ type Store = {
   setFocused: (id: string | null) => void
 }
 
-const emptyDoc = (profession: Profession): DocumentState => profession === 'doctor'
-  ? { title: 'Clinical Note', sections: [
-      { id:'chief_complaint', label:'Chief Complaint', content:'' }, { id:'history', label:'History of Present Illness', content:'' },
-      { id:'history_social_family', label:'Past / Social / Family History', content:'' }, { id:'allergies', label:'Allergies', content:'' },
-      { id:'observations', label:'Observations / Vitals', content:'' }, { id:'examination', label:'Examination Findings', content:'' },
-      { id:'investigations', label:'Investigations', content:'' }, { id:'assessment', label:'Assessment', content:'' },
-      { id:'plan', label:'Plan', content:'' }, { id:'follow_up', label:'Follow-up', content:'' }
-    ], needs_input: [], warnings: [], unplaced: [], provider:'ready', provider_name:'local demo' }
-  : { title: 'Case Note', sections: [
-      { id:'parties', label:'Parties', content:'' }, { id:'facts', label:'Facts / Incident Summary', content:'' },
-      { id:'injuries', label:'Injuries / Damages', content:'' }, { id:'liability', label:'Liability / Issues', content:'' },
-      { id:'authorities', label:'Authorities', content:'' }, { id:'evidence', label:'Supporting Information', content:'' }, { id:'next_steps', label:'Next Steps', content:'' }
-    ], needs_input: [], warnings: [], unplaced: [], provider:'ready', provider_name:'local demo' }
+const emptyDoc = (profession: Profession): DocumentState => {
+  const tpl = templateFor(profession)
+  if (tpl) {
+    return { title: tpl.name, sections: tpl.sections.map(s => ({ id: s.id, label: s.label, content: '' })),
+      needs_input: [], warnings: [], unplaced: [], provider: 'ready', provider_name: 'local demo', template_id: tpl.id }
+  }
+  const GENERIC = [{id:'summary',label:'Summary'},{id:'key_points',label:'Key Points'},{id:'details',label:'Details'},
+    {id:'decisions',label:'Decisions'},{id:'actions',label:'Actions / Next Steps'},{id:'open_questions',label:'Open Questions'}]
+  const sections = LEGACY_SECTIONS[profession] || GENERIC
+  return { title: TITLES[profession] || 'Professional Document', sections: sections.map(s => ({ ...s, content: '' })),
+    needs_input: [], warnings: [], unplaced: [], provider: 'ready', provider_name: 'local demo' }
+}
 
 const useAda = create<Store>((set) => ({
   profession: 'doctor', notes: '', document: emptyDoc('doctor'), focusedSection: null, lockedSections: new Set<string>(),
+  professionalTemplates: [] as TemplateInfo[],
   setProfession: (profession) => set({ profession, document: emptyDoc(profession), lockedSections: new Set<string>() }),
   setNotes: (notes) => set({ notes }), setDocument: (document) => set({ document: normalizeDocument(document) }),
   editSection: (id, content) => set(s => { const locked = new Set(s.lockedSections); locked.add(id); return { lockedSections: locked, document: { ...s.document, sections: s.document.sections.map(x => x.id === id ? {...x, content} : x) } } }),
@@ -405,12 +461,11 @@ const useAda = create<Store>((set) => ({
 function goTo(path: string) { window.history.pushState({}, '', path); window.dispatchEvent(new PopStateEvent('popstate')) }
 
 function hasAdaPresence(): boolean {
-  const profession = localStorage.getItem(PROFESSION_KEY);
-  return profession === 'doctor' || profession === 'lawyer';
+  return !!safeStorageGet(browserStorage(), PROFESSION_KEY);
 }
 
 function PublicPage() {
-  const start = () => { if (!localStorage.getItem(PROFESSION_KEY)) localStorage.setItem(PROFESSION_KEY, 'doctor'); localStorage.setItem(ONBOARDED_KEY, 'true'); goTo('/0.1') }
+  const start = () => { if (!safeStorageGet(browserStorage(), PROFESSION_KEY)) safeStorageSet(browserStorage(), PROFESSION_KEY, 'doctor'); safeStorageSet(browserStorage(), ONBOARDED_KEY, 'true'); goTo('/0.1') }
   return <main className="public-page ada-home">
     <header className="public-top"><button className="public-brand" onClick={()=>goTo('/')}><strong>Ada</strong></button><nav className="home-nav"><a href="#how-it-works">How it works</a><a href="#professionals">For professionals</a><a href="#pricing">Pricing</a><button onClick={start}>Open Ada </button></nav></header>
     <section className="home-hero"><div className="hero-copy"><span className="eyebrow">DOCUMENTATION WITHOUT THE INTERRUPTION</span><h1>Be present with your client. <em className="accent-heading">Let Ada handle the record.</em></h1><p>A professional documentation workspace for doctors. Scribble freely, speak naturally, upload rough documents, or scan handwritten notes in the left pane. Ada turns raw input into a structured clinical record in the right pane.</p><div className="hero-actions"><button className="home-primary" onClick={start}>Start documenting free <span></span></button><a href="#how-it-works">See how it works</a></div><div className="hero-proof"><span>✳ Free-form capture</span><span>◉ Local browser history</span><span>⌁ Editable output</span></div></div>
@@ -431,6 +486,22 @@ function App() {
   const [isOnline, setIsOnline] = useState(() => navigator.onLine)
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>('professional')
   const [professionLocked, setProfessionLocked] = useState<Profession>('doctor')
+  const setTemplatesTickH = useState(0)[1]
+  const prevNotes = useRef('')
+
+  const [account, setAccount] = useState<any>(null)
+  const sessionOrder = useRef(0)
+  const applyAccount = (a: any, responseOrder: number) => {
+    if (!a || !('authenticated' in a)) return
+    if (isLatestSessionResponse(responseOrder, sessionOrder.current)) setAccount(a)
+  }
+  const [authOpen, setAuthOpen] = useState(false)
+  const [authMode, setAuthMode] = useState<'login' | 'signup'>('login')
+  const [authError, setAuthError] = useState('')
+  const [authEmail, setAuthEmail] = useState('')
+  const [authPassword, setAuthPassword] = useState('')
+  const [persona, setPersona] = useState<PersonaProfile | null>(() => loadPersona())
+  const [onboardingOpen, setOnboardingOpen] = useState(false)
   const [split, setSplit] = useState(50)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [history, setHistory] = useState<SavedNote[]>([])
@@ -441,7 +512,7 @@ function App() {
   const [copyState, setCopyState] = useState('Copy to Clipboard')
   const [gateMessage, setGateMessage] = useState('')
   const [usage, setUsage] = useState<Record<UsageKind, number>>(readUsage())
-  const [privateMode, setPrivateMode] = useState(() => localStorage.getItem('ada-private-mode') === 'true')
+  const [privateMode, setPrivateMode] = useState(() => safeStorageGet(browserStorage(), 'ada-private-mode') === 'true')
   const [voiceState, setVoiceState] = useState<'idle' | 'listening'>('idle')
   const speechRecognition = useRef<SpeechRecognitionInstance | null>(null)
   const generationCharged = useRef(false)
@@ -456,24 +527,36 @@ function App() {
 
   useEffect(() => {
     const goOnline = () => { setIsOnline(true); setStatus('Online · ready') }
-    const goOffline = () => { setIsOnline(false); setPrivateMode(true); localStorage.setItem('ada-private-mode', 'true'); setStatus('Offline · private mode') }
+    const goOffline = () => { setIsOnline(false); setPrivateMode(true); safeStorageSet(browserStorage(), 'ada-private-mode', 'true'); setStatus('Offline · private mode') }
     window.addEventListener('online', goOnline)
     window.addEventListener('offline', goOffline)
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {})
     listLocalNotes().then(setHistory).catch(() => setStatus('Local history unavailable'))
-    const savedProfession = localStorage.getItem(PROFESSION_KEY) as Profession | null
-    if (savedProfession === 'doctor' || savedProfession === 'lawyer') { setProfessionLocked(savedProfession); setProfession(savedProfession) }
+    const savedProfession = safeStorageGet(browserStorage(), PROFESSION_KEY) as Profession | null
+    if (savedProfession) { setProfessionLocked(savedProfession); setProfession(savedProfession) }
+    if (safeStorageGet(browserStorage(), ONBOARDED_KEY) === 'true' && !loadPersona() && safeStorageGet(browserStorage(), 'ada-persona-skipped') !== '1') setOnboardingOpen(true)
+    loadTemplates().then(tpls => {
+      if (tpls.length) setTemplatesTickH(v => v + 1)
+      const st = useAda.getState()
+      if (st.document.template_id == null && TEMPLATES.length) {
+        const tplLocal = TEMPLATES.find(t => t.profession === st.profession)
+        if (tplLocal) useAda.setState({ document: { ...emptyDoc(tplLocal.profession), template_id: tplLocal.id, title: tplLocal.name } })
+      }
+    })
     try {
-      const draft = localStorage.getItem('ada-current-draft')
+      const draft = safeStorageGet(browserStorage(), 'ada-current-draft')
       if (draft) {
         const parsed = JSON.parse(draft) as { profession: Profession; document: DocumentState }
         if (parsed.document) {
           useAda.setState({ profession: parsed.profession, notes: '', document: normalizeDocument(parsed.document), lockedSections: new Set<string>() })
-          localStorage.setItem('ada-current-draft', JSON.stringify({ profession: parsed.profession, document: normalizeDocument(parsed.document) }))
+          safeStorageSet(browserStorage(), 'ada-current-draft', JSON.stringify({ profession: parsed.profession, document: normalizeDocument(parsed.document) }))
+          restoredDraftPending = true
           setStatus('Structured document restored from this device')
         }
       }
     } catch {}
+    const accountRequestOrder = ++sessionOrder.current
+    fetch('/api/auth/me?t=' + Date.now()).then(r => r.ok ? r.json() : null).then(a => applyAccount(a, accountRequestOrder)).catch(() => {})
     return () => {
       window.removeEventListener('online', goOnline)
       window.removeEventListener('offline', goOffline)
@@ -481,7 +564,7 @@ function App() {
   }, [])
 
   useEffect(() => {
-    try { localStorage.setItem('ada-current-draft', JSON.stringify({ profession, document })) } catch {}
+    safeStorageSet(browserStorage(), 'ada-current-draft', JSON.stringify({ profession, document }))
   }, [profession, notes, document])
 
   function resizeScribbleCanvas() {
@@ -571,7 +654,7 @@ function App() {
   function togglePrivateMode() {
     setPrivateMode(value => {
       const next = !value
-      localStorage.setItem('ada-private-mode', String(next))
+      safeStorageSet(browserStorage(), 'ada-private-mode', String(next))
       setStatus(next ? 'Private mode · on-device structuring' : 'Online AI mode')
       return next
     })
@@ -693,16 +776,12 @@ function App() {
     setHistory(await listLocalNotes())
   }
 
-  useEffect(() => {
-    if (profession !== 'doctor') {
-      localStorage.setItem(PROFESSION_KEY, 'doctor')
-      setProfession('doctor')
-    }
-  }, [])
+  // universal: profession persisted from onboarding/template choice; no forced default
 
   function startNewEncounter() {
-    useAda.setState({ profession: 'doctor', notes: '', document: emptyDoc('doctor'), focusedSection: null, lockedSections: new Set<string>() })
-    setStatus('New clinical note')
+    const state = useAda.getState()
+    useAda.setState({ profession: state.profession, notes: '', document: emptyDoc(state.profession), focusedSection: null, lockedSections: new Set<string>() })
+    setStatus('New ' + (state.document.title || 'document'))
   }
 
   function markReviewComplete() {
@@ -729,32 +808,44 @@ function App() {
     }
   }, [scribbleMode])
 
+  const generationTrigger = generationTriggerKey(notes, profession, workspaceMode, privateMode, isOnline)
+
   useEffect(() => {
     window.clearTimeout(timer.current)
     if (!notes.trim()) generationCharged.current = false
+    const wasNonEmpty = prevNotes.current
+    prevNotes.current = notes
     if (!notes.trim() || workspaceMode === 'quick') {
-      if (!notes.trim() && workspaceMode === 'professional') { setDocument(emptyDoc(profession)); useAda.setState({ lockedSections: new Set<string>() }) }
+      if (!notes.trim() && workspaceMode === 'professional' && wasNonEmpty) { setDocument(emptyDoc(profession)); useAda.setState({ lockedSections: new Set<string>() }) }
       if (!notes.trim()) setStatus('Ready')
       return
     }
     timer.current = window.setTimeout(async () => {
-      if (!generationCharged.current) { if (!requireFreeUse('professional', 'Professional Document')) return; generationCharged.current = true }
+      if (!generationCharged.current) {
+        if (account?.authenticated) {
+          if (!accountCanGenerate(account)) { setGateMessage('Your account has reached its monthly AI document limit. Upgrade to Pro for unlimited use.'); return }
+        } else if (!requireFreeUse('professional', 'Professional Document')) return
+        generationCharged.current = true
+      }
       request.current?.abort(); request.current = new AbortController()
       const currentLocal = useAda.getState()
-      const localDraft = localStructureDocument(profession, notes)
-      const mergedLocal = { ...localDraft, sections: localDraft.sections.map(section => { const currentSection = currentLocal.document.sections.find(item => item.id === section.id); return currentLocal.lockedSections.has(section.id) && currentSection ? currentSection : section }) }
+      const activeTemplate = (document.template_id ? TEMPLATES.find(t => t.id === document.template_id) : null) || templateFor(profession)
+      const localDraft = profession === 'doctor' || profession === 'lawyer'
+        ? localStructureDocument(profession, notes)
+        : normalizeDocument(buildTemplateDraft(activeTemplate || { id: 'generic_freeform', name: 'Professional Document', sections: emptyDoc(profession).sections }, notes))
+      const mergedLocal = mergeLockedSections(currentLocal.document, localDraft, currentLocal.lockedSections)
       setDocument(mergedLocal)
       setStatus(privateMode || !isOnline ? 'Private mode · local AI starting…' : 'Local draft · refining online…')
       try {
         if (privateMode || !isOnline) {
-          const localAi = await localModelStructure(profession, notes, message => setStatus(message))
+          const localAi = await localModelStructure(profession, notes, message => setStatus(message), activeTemplate)
           const latest = useAda.getState()
-          const mergedAi = { ...localAi, sections: localAi.sections.map(section => { const currentSection = latest.document.sections.find(item => item.id === section.id); return latest.lockedSections.has(section.id) && currentSection ? currentSection : section }) }
+          const mergedAi = mergeLockedSections(latest.document, normalizeDocument(localAi), latest.lockedSections)
           setDocument(mergedAi)
           setStatus('Private · local AI')
           return
         }
-        const r = await fetch('/api/structure', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({profession, notes, current_document:document}), signal:request.current.signal })
+        const r = await fetch('/api/structure', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({profession, notes, template_id: document.template_id, current_document: document, locked_sections: [...lockedSections], profile: toApiProfile(persona)}), signal:request.current.signal })
         if (!r.ok) {
           let detail = 'Request failed'
           try {
@@ -765,14 +856,16 @@ function App() {
         }
         const next = normalizeDocument(await r.json())
         const current = useAda.getState()
-        const merged = { ...next, sections: next.sections.map(section => { const currentSection = current.document.sections.find(item => item.id === section.id); return current.lockedSections.has(section.id) && currentSection ? currentSection : section }) }
+        const merged = mergeLockedSections(current.document, next, current.lockedSections)
         setDocument(merged); setStatus(next.provider === 'local-demo' ? 'Local demo engine' : 'Live: ' + next.provider)
+        const accountRequestOrder = ++sessionOrder.current
+        fetch('/api/auth/me?t=' + Date.now()).then(r => r.ok ? r.json() : null).then(a => applyAccount(a, accountRequestOrder)).catch(() => {})
       } catch (e) {
         if ((e as Error).name !== 'AbortError') setStatus('Could not update: ' + (e as Error).message)
       }
     }, 650)
     return () => window.clearTimeout(timer.current)
-  }, [notes, profession, workspaceMode, privateMode, isOnline])
+  }, [generationTrigger])
 
   function handlePointer(e: React.PointerEvent<HTMLDivElement>) {
     const parent = e.currentTarget.parentElement?.getBoundingClientRect(); if (!parent) return
@@ -780,12 +873,72 @@ function App() {
   }
 
   return <main className="app">
+      {onboardingOpen && (
+        <Onboarding
+          templates={TEMPLATES.map(t => ({ id: t.id, name: t.name, profession: t.profession, profession_label: t.profession_label }))}
+          onDone={(profile, prof) => { setPersona(profile); setOnboardingOpen(false); safeStorageRemove(browserStorage(), 'ada-persona-skipped'); setProfession(prof); setTemplatesTickH(v => v + 1) }}
+          onSkip={() => { setOnboardingOpen(false); safeStorageSet(browserStorage(), 'ada-persona-skipped', '1') }}
+        />
+      )}
+      {authOpen && (
+        <div className="auth-backdrop" role="dialog" aria-modal="true" aria-label="Account">
+          <div className="onboarding-card auth-card">
+            <div className="onboarding-steps"><span className="ob-step current">{authMode === 'login' ? 'Sign in' : 'Create account'}</span></div>
+            <h2 className="onboarding-title">{authMode === 'login' ? 'Welcome back' : 'Create your Ada account'}</h2>
+            <p className="onboarding-sub">{authMode === 'login' ? 'Sign in for monthly usage tracking and Pro entitlements.' : 'Accounts add monthly usage tracking. Free plan: 10 generations per month; Pro: unlimited.'}</p>
+            <form className="onboarding-body" onSubmit={async (e) => {
+              e.preventDefault(); setAuthError('')
+              try {
+                const accountRequestOrder = ++sessionOrder.current
+                const r = await fetch('/api/auth/' + authMode, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: authEmail, password: authPassword }) })
+                const body = r.ok ? await r.json() : null
+                if (r.ok && body) { applyAccount(body, accountRequestOrder); setAuthOpen(false); setAuthPassword('') }
+                else { const d = await r.json().catch(() => null); setAuthError(typeof d?.detail === 'string' ? d.detail : 'Could not sign in') }
+              } catch { setAuthError('Network error — try again') }
+            }}>
+              <label className="ob-label" htmlFor="auth-email">Email</label>
+              <input id="auth-email" type="email" required value={authEmail} onChange={e => setAuthEmail(e.target.value)} placeholder="you@example.com" className="ob-input" />
+              <label className="ob-label" htmlFor="auth-password">Password</label>
+              <input id="auth-password" type="password" required value={authPassword} onChange={e => setAuthPassword(e.target.value)} placeholder="At least 8 characters" className="ob-input" />
+              {authError ? <p className="ob-hint" role="alert">{authError}</p> : null}
+              <div className="onboarding-actions">
+                <button type="button" className="ob-secondary" onClick={() => { setAuthOpen(false); setAuthPassword('') }}>Not now</button>
+                <button type="submit" className="ob-primary">{authMode === 'login' ? 'Sign in' : 'Create account'}</button>
+              </div>
+              <p className="ob-hint">
+                {authMode === 'login'
+                  ? <>New here? <button type="button" className="ob-link" onClick={() => { setAuthMode('signup'); setAuthError('') }}>Create an account</button></>
+                  : <>Already have an account? <button type="button" className="ob-link" onClick={() => { setAuthMode('login'); setAuthError('') }}>Sign in</button></>}
+              </p>
+            </form>
+          </div>
+        </div>
+      )}
     <header className="topbar">
       <div className="brand"><div><strong>Ada</strong><span>Clinical Documentation</span></div></div>
-      <div className="workspace-title">Clinical Documentation</div>
+      <div className="workspace-controls picker-cluster">
+        <select aria-label="Document type" className="template-picker"
+          value={document.template_id || (templateFor(profession)?.id ?? '')}
+          onChange={e => {
+            const tpl = TEMPLATES.find(t => t.id === e.target.value)
+            if (!tpl) return
+            setProfession(tpl.profession)
+            useAda.setState({ profession: tpl.profession, document: emptyDoc(tpl.profession), lockedSections: new Set<string>() })
+            useAda.setState(s2 => ({ document: { ...emptyDoc(tpl.profession), template_id: tpl.id, title: tpl.name } }))
+            safeStorageSet(browserStorage(), PROFESSION_KEY, tpl.profession)
+            setStatus(tpl.name + ' ready')
+          }}>
+          {TEMPLATES.length
+            ? TEMPLATES.map(t => <option key={t.id} value={t.id}>{t.profession_label} · {t.name}</option>)
+            : <option>{document.title || 'Clinical Note'}</option>}
+        </select>
+      </div>
+      <div className="workspace-title">{document.title || 'Documentation'}{persona?.name && persona.name !== 'there' ? <span className="workspace-owner"> · {persona.name}</span> : null}<button className="prefs-btn" onClick={() => setOnboardingOpen(true)} title="Edit preferences">Preferences</button>{account?.authenticated ? (<button className="auth-chip auth-in" onClick={async () => { ++sessionOrder.current; try { await fetch('/api/auth/logout', { method: 'POST' }) } catch {} setAccount({ authenticated: false }) }} title="Sign out">{account.email.split('@')[0]} · {account.plan === 'pro' ? 'Pro' : 'Free'} · Sign out</button>) : (<button className="auth-chip" onClick={() => { setAuthMode('login'); setAuthError(''); setAuthOpen(true) }}>Log in</button>)}</div>
       <div className="workspace-controls">
         <button type="button" className={privateMode ? 'private-toggle active' : 'private-toggle'} onClick={togglePrivateMode} title="Private mode keeps structuring on this device and does not call the AI API">◉ {privateMode ? 'Private' : 'Online AI'}</button>
-        <span className="usage-pill">{isProfessionalPlan() ? 'Professional · unlimited' : 'Free · ' + usage.professional + '/10 docs'}</span>
+        <span className="usage-pill">{account?.authenticated
+          ? (account.usage?.limit == null ? 'Pro · unlimited' : 'Free · ' + account.usage.used + '/' + account.usage.limit + ' AI docs')
+          : (isProfessionalPlan() ? 'Professional · unlimited' : 'Free · ' + usage.professional + '/10 docs')}</span>
       </div>
       <div className="status"><i></i>{isOnline ? status : "Offline · Private mode"}</div>
     </header>

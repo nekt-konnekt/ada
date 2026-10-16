@@ -6,13 +6,40 @@ from typing import Literal
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 load_dotenv()
 
+from app.fidelity import (
+    completeness_check,
+    sentences,
+    validate_fidelity,  # noqa: F401  (re-exported public surface)
+    UNIT_TOKENS,
+    COMMON_DRUGS,
+    _is_note_instruction,
+)
+from app.accounts import (
+    AccountError,
+    COOKIE_NAME,
+    check_generation_available,
+    create_session,
+    create_user,
+    delete_session,
+    init_db,
+    record_generation,
+    set_plan,
+    usage_snapshot,
+    user_for_token,
+    verify_login,
+)
+from app.personas import PersonaProfile, StructureResponse, TemplateSpec, WorkspaceContext
+from app.structuring import structure_from_context
+from app.templates import list_templates, template_for_profile_or_profession
+
 app = FastAPI(title="Ada 0.1 API", version="0.1.0")
+init_db()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -21,219 +48,45 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-Profession = Literal["doctor", "lawyer"]
+Profession = str  # universal: any template-driven profession; legacy literal widened
 
 
 class StructureRequest(BaseModel):
-    profession: Profession
+    profession: Profession = "doctor"
     notes: str = Field(max_length=30000)
     current_document: dict = Field(default_factory=dict)
+    template_id: str | None = None
+    profile: PersonaProfile | None = None
+    locked_sections: list[str] = Field(default_factory=list)
 
 
-class StructureResponse(BaseModel):
-    profession: Profession
-    title: str
-    sections: list[dict]
-    needs_input: list[dict] = Field(default_factory=list)
-    warnings: list[dict] = Field(default_factory=list)
-    unplaced: list[str] = Field(default_factory=list)
-    provider: str
-    provider_name: str = "local demo"
+# fidelity + universal engine imports live at top of file
 
 
 def clean(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-def sentences(text: str) -> list[str]:
-    return [x.strip(" .") for x in re.split(r"(?<=[.!?])\s+|\n+", text) if x.strip()]
-
-
-UNIT_TOKENS = {
-    "mg", "mcg", "g", "kg", "ml", "l", "mmhg", "bpm", "c", "f", "cm", "mm",
-    "hrs", "hr", "hours", "hour", "mins", "min", "minutes", "minute", "years",
-    "year", "days", "day", "weeks", "week", "months", "month"
-}
-COMMON_DRUGS = {
-    "aspirin", "ibuprofen", "paracetamol", "acetaminophen", "amoxicillin",
-    "metformin", "insulin", "warfarin", "heparin", "atorvastatin", "omeprazole",
-    "azithromycin", "diclofenac", "naproxen", "prednisolone", "salbutamol"
-}
-
-def _source_tokens(text: str) -> set[str]:
-    return set(re.findall(r"[A-Za-z0-9]+(?:\.[0-9]+)?", text.lower()))
-
-def _content_tokens(document: dict) -> set[str]:
-    values = []
-    for section in document.get("sections", []) if isinstance(document, dict) else []:
-        if isinstance(section, dict):
-            values.append(str(section.get("content") or ""))
-    return _source_tokens(" ".join(values))
-
-def _output_text(response: StructureResponse) -> str:
-    return " ".join(str(section.get("content") or "") for section in response.sections)
-
-def validate_fidelity(notes: str, current_document: dict, response: StructureResponse) -> list[dict]:
-    source = _source_tokens(notes) | _content_tokens(current_document)
-    output = _output_text(response)
-    warnings = []
-
-    for token in sorted(_source_tokens(output) - source):
-        if token in UNIT_TOKENS or re.fullmatch(r"\d+(?:\.\d+)?", token):
-            warnings.append({"section_id": _section_for_token(response, token), "message": f"Not in your notes: '{token}'", "token": token})
-        elif token in COMMON_DRUGS:
-            warnings.append({"section_id": _section_for_token(response, token), "message": f"Not in your notes: '{token}'", "token": token})
-
-    # Catch multi-character numeric expressions and units that may be attached.
-    source_numbers = set(re.findall(r"\b\d+(?:\.\d+)?\s*[A-Za-z%]+", notes.lower()))
-    output_numbers = set(re.findall(r"\b\d+(?:\.\d+)?\s*[A-Za-z%]+", output.lower()))
-    for expression in sorted(output_numbers - source_numbers):
-        token = expression.split()[-1]
-        if token not in source:
-            warnings.append({"section_id": _section_for_token(response, token), "message": f"Not in your notes: '{token}'", "token": token})
-
-    unique = []
-    seen = set()
-    for warning in warnings:
-        key = (warning["section_id"], warning["token"])
-        if key not in seen:
-            seen.add(key)
-            unique.append(warning)
-    return unique
-
-def _section_for_token(response: StructureResponse, token: str) -> str | None:
-    token_lower = token.lower()
-    for section in response.sections:
-        if token_lower in str(section.get("content") or "").lower():
-            return str(section.get("id"))
-    return None
-
-def completeness_check(notes: str, response: StructureResponse) -> list[str]:
-    source_sentences = sentences(notes)
-    output = _output_text(response).lower()
-    unplaced = []
-    for sentence in source_sentences:
-        words = [w for w in re.findall(r"[a-z0-9]+", sentence.lower()) if len(w) > 2]
-        if not words:
-            continue
-        # Exact phrase is the strongest signal; otherwise require most distinctive words.
-        if sentence.lower() in output:
-            continue
-        distinctive = [w for w in words if w not in {"the", "and", "was", "were", "with", "from", "that", "this", "for", "had", "has", "have"}]
-        overlap = sum(1 for w in distinctive if w in output) / max(1, len(distinctive))
-        if overlap < 0.55:
-            unplaced.append(sentence)
-    return unplaced
-
-def _is_note_instruction(sentence: str) -> bool:
-    lowered = sentence.lower()
-    return any(marker in lowered for marker in [
-        "ignore your rules",
-        "ignore the rules",
-        "ignore previous instructions",
-        "write that the patient has",
-        "follow these instructions",
-    ])
-
-def local_structure(profession: Profession, notes: str) -> StructureResponse:
-    if not notes.strip():
-        if profession == "doctor":
-            sections = [
-                {"id": "chief_complaint", "label": "Chief Complaint", "content": ""},
-                {"id": "history", "label": "History of Present Illness", "content": ""},
-                {"id": "history_social_family", "label": "Past / Social / Family History", "content": ""},
-                {"id": "allergies", "label": "Allergies", "content": ""},
-                {"id": "observations", "label": "Observations / Vitals", "content": ""},
-                {"id": "examination", "label": "Examination Findings", "content": ""},
-                {"id": "investigations", "label": "Investigations", "content": ""},
-                {"id": "assessment", "label": "Assessment", "content": ""},
-                {"id": "plan", "label": "Plan", "content": ""},
-                {"id": "follow_up", "label": "Follow-up", "content": ""},
-            ]
-            return StructureResponse(profession=profession, title="Clinical Note", sections=sections, provider="local-demo")
-        sections = [
-            {"id": "parties", "label": "Parties", "content": ""},
-            {"id": "facts", "label": "Facts / Incident Summary", "content": ""},
-            {"id": "injuries", "label": "Injuries / Damages", "content": ""},
-            {"id": "liability", "label": "Liability / Issues", "content": ""},
-            {"id": "authorities", "label": "Authorities", "content": ""},
-            {"id": "evidence", "label": "Supporting Information", "content": ""},
-            {"id": "next_steps", "label": "Next Steps", "content": ""},
-        ]
-        return StructureResponse(profession=profession, title="Case Note", sections=sections, provider="local-demo")
-
-    ss = [sentence for sentence in sentences(notes) if not _is_note_instruction(sentence)]
-    lower = " ".join(ss).lower()
-
-    if profession == "doctor":
-        def join_matching(patterns: list[str]) -> str:
-            return " ".join(s for s in ss if any(re.search(pattern, s, re.I) for pattern in patterns))
-
-        chief_source = next((s for s in ss if re.search(r"\b(chest pain|pain|fever|cough|headache|complain|presented|came in)\b", s, re.I)), "")
-        chief = re.search(r"\b(chest pain|pain|fever|cough|headache)\b", chief_source, re.I).group(0) if chief_source and re.search(r"\b(chest pain|pain|fever|cough|headache)\b", chief_source, re.I) else chief_source
-        negatives = join_matching([r"\bno\s+", r"\bdenies\s+"])
-        history_social_family = join_matching([r"\bsmoker\b", r"\bfather\b", r"\bfamily\b", r"\bmedical history\b", r"\bsocial history\b"])
-        allergies = join_matching([r"\ballerg"])
-        observations = join_matching([r"\bBP\b", r"\bHR\b", r"\btemp\b"])
-        examination = join_matching([r"\blungs\b", r"\bheart sounds\b", r"\bmurmur\b"])
-        investigations = join_matching([r"\bECG\s+done\b", r"\bECG\s+result\b", r"\bECG\s+show"])
-        assessment = next((s for s in ss if re.search(r"\?\s*angina|\bassessment\b", s, re.I)), "")
-        plan = join_matching([r"\bplan:", r"\baspirin\b", r"\btroponin\b", r"\brepeat ECG\b", r"\brefer\b", r"\badvise\b"])
-        follow_up = join_matching([r"\breview\b", r"\bfollow[- ]?up\b"])
-        history_excluded = [
-            r"\bsmoker\b", r"\bfather\b", r"\ballerg", r"\bBP\b", r"\bHR\b", r"\btemp\b",
-            r"\blungs\b", r"\bheart sounds\b", r"\bmurmur\b", r"\bECG\b", r"\?\s*angina",
-            r"\bplan:", r"\baspirin\b", r"\btroponin\b", r"\brepeat ECG\b", r"\brefer\b", r"\badvise\b",
-            r"\breview\b", r"\bfollow[- ]?up\b"
-        ]
-        history = " ".join(s for s in ss if (s == chief_source or not any(re.search(pattern, s, re.I) for pattern in history_excluded)) and s != chief)
-        sections = [
-            {"id": "chief_complaint", "label": "Chief Complaint", "content": chief},
-            {"id": "history", "label": "History of Present Illness", "content": history},
-            {"id": "history_social_family", "label": "Past / Social / Family History", "content": history_social_family},
-            {"id": "allergies", "label": "Allergies", "content": allergies},
-            {"id": "observations", "label": "Observations / Vitals", "content": observations},
-            {"id": "examination", "label": "Examination Findings", "content": examination},
-            {"id": "investigations", "label": "Investigations", "content": investigations},
-            {"id": "assessment", "label": "Assessment", "content": assessment},
-            {"id": "plan", "label": "Plan", "content": plan},
-            {"id": "follow_up", "label": "Follow-up", "content": follow_up},
-        ]
-        response = StructureResponse(
-            profession=profession, title="Clinical Note", sections=sections,
-            needs_input=([{"id": "plan", "question": "What dose was intended for any medication without a stated dose?", "section_id": "plan"}] if re.search(r"\b(aspirin|ibuprofen|paracetamol|amoxicillin)\b", lower) and not re.search(r"\b(aspirin|ibuprofen|paracetamol|amoxicillin)\s+\d", lower) else []),
-            provider="local-demo",
-        )
-        response.warnings = validate_fidelity(notes, {}, response)
-        response.unplaced = completeness_check(notes, response)
-        return response
-
-    parties = " ".join(s for s in ss if any(k in s.lower() for k in ["client", "plaintiff", "defendant", "driver", "company", "insurer"]))
-    facts = " ".join(s for s in ss if s not in {parties} and any(k in s.lower() for k in ["accident", "hit", "collision", "happened", "driving", "road", "vehicle", "incident"]))
-    injuries = " ".join(s for s in ss if any(k in s.lower() for k in ["pain", "injury", "injured", "hospital", "x-ray", "headache", "neck", "back", "medical"]))
-    evidence = " ".join(s for s in ss if any(k in s.lower() for k in ["police", "report", "photo", "witness", "record", "xray", "x-ray"]))
-    authorities = "; ".join(clean(match) for match in re.findall(r"(?i)\b[A-Z][A-Za-z'’.-]+(?:\s+v\.?\s+[A-Z][A-Za-z'’.-]+)+\s*\([^)]*\d{4}[^)]*\)", notes))
-    remainder = " ".join(s for s in ss if s not in {parties, facts, injuries, evidence})
-    response = StructureResponse(
-        profession=profession, title="Case Note",
-        sections=[
-            {"id": "parties", "label": "Parties", "content": parties},
-            {"id": "facts", "label": "Facts / Incident Summary", "content": facts or remainder},
-            {"id": "injuries", "label": "Injuries / Damages", "content": injuries},
-            {"id": "liability", "label": "Liability / Issues", "content": ""},
-            {"id": "authorities", "label": "Authorities", "content": authorities},
-            {"id": "evidence", "label": "Supporting Information", "content": evidence},
-            {"id": "next_steps", "label": "Next Steps", "content": remainder if facts else ""},
-        ],
-        needs_input=[],
-        provider="local-demo",
+def local_structure(profession: Profession, notes: str, template_id: str | None = None,
+                    profile: PersonaProfile | None = None, current_document: dict | None = None,
+                    locked_sections: list[str] | None = None,
+                    template_owner_id: str | None = None):
+    """Legacy entry point: now a thin wrapper over the shared template engine."""
+    context = WorkspaceContext(
+        profile=profile,
+        template_id=template_id or (profession or ""),
+        notes=notes,
+        current_document=current_document or {},
+        locked_sections=locked_sections or [],
     )
-    response.warnings = validate_fidelity(notes, {}, response)
-    response.unplaced = completeness_check(notes, response)
+    response = structure_from_context(context, template_owner_id=template_owner_id)
+    response.provider = "local-demo"
+    response.provider_name = "local demo"
     return response
 
 
-async def llm_structure(req: StructureRequest) -> StructureResponse | None:
+
+async def llm_structure(req: StructureRequest, template: TemplateSpec) -> StructureResponse | None:
     key = os.getenv("LLM_API_KEY", "").strip() or os.getenv("GEMINI_API_KEY", "").strip()
     provider = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
     configured_model = os.getenv("LLM_MODEL", "gemini-3.5-flash").strip()
@@ -242,7 +95,7 @@ async def llm_structure(req: StructureRequest) -> StructureResponse | None:
     if not key:
         return None
 
-    if req.profession == "doctor":
+    if template.id == "doctor_clinical_note":
         section_rules = """
 - chief_complaint: the patient's main reason for seeking care, including patient-reported symptoms or concerns.
 - history: chronology and context of the complaint, including what the patient reports.
@@ -267,7 +120,7 @@ async def llm_structure(req: StructureRequest) -> StructureResponse | None:
             "plan": "Plan",
             "follow_up": "Follow-up",
         }
-    else:
+    elif template.id == "lawyer_case_note":
         section_rules = """
 - parties: people or organizations involved, with their roles only when stated.
 - facts: factual events and chronology stated by the user. Keep allegations attributed and do not convert allegations into established facts.
@@ -285,6 +138,9 @@ async def llm_structure(req: StructureRequest) -> StructureResponse | None:
             "evidence": "Supporting Information",
             "next_steps": "Next Steps",
         }
+    else:
+        section_rules = template.instructions
+        labels = {section.id: section.label for section in template.sections}
 
     schema = list(labels.keys())
     prompt = f"""You are Ada, a real-time professional note-to-document engine for a {req.profession}.
@@ -323,7 +179,7 @@ Return JSON only. No markdown and no commentary.
 
 JSON shape:
 {{
-  "title": "Clinical Note" or "Case Note",
+  "title": {json.dumps(template.title)},
   "sections": [
     {{"id": "section_id", "label": "section label", "content": "structured content"}}
   ],
@@ -451,14 +307,16 @@ Raw notes:
                 normalized_needs.append({
                     "id": str(item.get("id") or "needs_input"),
                     "question": question,
-                    "section_id": str(item.get("section_id") or ("plan" if req.profession == "doctor" else "next_steps")),
+                    "section_id": str(item.get("section_id") or (template.needs_input_on[0] if template.needs_input_on else schema[-1])),
                 })
         elif str(item).strip():
-            normalized_needs.append({"id": "needs_input", "question": str(item).strip(), "section_id": "plan" if req.profession == "doctor" else "next_steps"})
+            normalized_needs.append({"id": "needs_input", "question": str(item).strip(), "section_id": template.needs_input_on[0] if template.needs_input_on else schema[-1]})
 
     response = StructureResponse(
         profession=req.profession,
-        title=parsed.get("title") or ("Clinical Note" if req.profession == "doctor" else "Case Note"),
+        template_id=template.id,
+        template_version=template.version,
+        title=parsed.get("title") or template.title,
         sections=ordered,
         needs_input=normalized_needs,
         provider=used_model,
@@ -477,9 +335,126 @@ async def health():
     return {"ok": True, "version": "0.1.0", "llm_configured": configured, "provider": os.getenv("LLM_PROVIDER", "gemini"), "base_url": os.getenv("LLM_BASE_URL", "https://generativelanguage.googleapis.com/v1beta"), "model": os.getenv("LLM_MODEL", "gemini-flash-latest")}
 
 
+@app.get("/api/templates")
+async def templates(request: Request):
+    user = user_for_token(request.cookies.get(COOKIE_NAME))
+    return {"templates": list_templates(owner_id=user["id"] if user else None)}
+
+
+# ---------- accounts & entitlements ----------
+
+class AuthRequest(BaseModel):
+    email: str
+    password: str
+
+
+def _set_session_cookie(response: Response, token: str):
+    import os as _os
+    response.set_cookie(
+        COOKIE_NAME, token,
+        max_age=30 * 24 * 3600, httponly=True, samesite="lax",
+        secure=_os.environ.get("ADA_COOKIE_SECURE", "0") == "1",
+    )
+
+
+def current_user(request: Request) -> dict:
+    return _user_dict(user_for_token(request.cookies.get(COOKIE_NAME)))
+
+
+def _user_dict(user) -> dict:
+    if not user:
+        return {"authenticated": False}
+    usage = usage_snapshot(user["id"], user["plan"])
+    return {"authenticated": True, "email": user["email"], "plan": user["plan"], "usage": usage}
+
+
+@app.post("/api/auth/signup")
+async def auth_signup(req: AuthRequest, response: Response):
+    try:
+        user = create_user(req.email, req.password)
+    except AccountError as exc:
+        raise HTTPException(exc.status, exc.detail)
+    token = create_session(user["id"])
+    _set_session_cookie(response, token)
+    return _user_dict(user)
+
+
+@app.post("/api/auth/login")
+async def auth_login(req: AuthRequest, response: Response):
+    try:
+        user = verify_login(req.email, req.password)
+    except AccountError as exc:
+        raise HTTPException(exc.status, exc.detail)
+    token = create_session(user["id"])
+    _set_session_cookie(response, token)
+    return _user_dict(user)
+
+
+@app.post("/api/auth/logout")
+async def auth_logout(request: Request, response: Response):
+    token = request.cookies.get(COOKIE_NAME)
+    if token:
+        delete_session(token)
+    response.delete_cookie(COOKIE_NAME)
+    return {"authenticated": False}
+
+
+@app.get("/api/auth/me")
+async def auth_me(request: Request):
+    from fastapi.responses import JSONResponse
+    return JSONResponse(current_user(request), headers={'Cache-Control': 'no-store'})
+
+
+@app.post("/api/entitlements/upgrade-demo")
+async def upgrade_demo(request: Request):
+    """Explicitly a DEMO plan switch (real billing requires a payment provider).
+    Requires an authenticated session. Logged for auditability."""
+    user = user_for_token(request.cookies.get(COOKIE_NAME))
+    if not user:
+        raise HTTPException(401, "Sign in first")
+    set_plan(user["id"], "pro")
+    print(f"[accounts] plan upgraded to pro for {user['id']} (demo activation, no payment recorded)")
+    return _user_dict(_user_by_id_safe(user["id"]))
+
+
+def _user_by_id_safe(user_id: str):
+    from app.accounts import _user_by_id
+    return _user_by_id(user_id)
+
+
 @app.post("/api/structure", response_model=StructureResponse)
-async def structure(req: StructureRequest):
-    result = await llm_structure(req)
-    if result:
-        return result
-    return local_structure(req.profession, req.notes)
+async def structure(req: StructureRequest, request: Request):
+    # Server-side usage accounting for signed-in users (free plan monthly cap).
+    # Guests keep the frontend local counter — no account required.
+    user = user_for_token(request.cookies.get(COOKIE_NAME))
+    llm_configured = bool(os.getenv("LLM_API_KEY", "").strip() or os.getenv("GEMINI_API_KEY", "").strip())
+    if user and llm_configured:
+        try:
+            check_generation_available(user["id"], user["plan"])
+        except AccountError as exc:
+            raise HTTPException(exc.status, exc.detail) from exc
+    profile = req.profile
+    owner_id = user["id"] if user else None
+    template = template_for_profile_or_profession(req.profession, req.template_id, owner_id=owner_id)
+    # Legacy LLM prompt path keeps its verified specialty prompts; new templates
+    # use their TemplateSpec instructions (see llm_structure).
+    local = local_structure(
+        req.profession, req.notes,
+        template_id=template.id, profile=profile,
+        current_document=req.current_document, locked_sections=req.locked_sections,
+        template_owner_id=owner_id,
+    )
+    llm = await llm_structure(req, template)
+    if llm is not None and user:
+        try:
+            record_generation(user["id"], user["plan"])
+        except AccountError as exc:
+            raise HTTPException(exc.status, exc.detail) from exc
+    chosen = llm if llm else local
+    # locked + user-edited sections always survive, whichever provider answered
+    if req.locked_sections and (req.current_document or {}).get("sections"):
+        keep = {s.get("id"): s.get("content", "") for s in req.current_document["sections"] if s.get("id") in set(req.locked_sections)}
+        for section in chosen.sections:
+            if section["id"] in keep:
+                section["content"] = keep[section["id"]]
+    return chosen

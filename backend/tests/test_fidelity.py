@@ -54,4 +54,4 @@ def test_locked_field_guard_exists_in_frontend():
     content = source.read_text()
     assert "lockedSections" in content
     assert "unlockSection" in content
-    assert "current.lockedSections.has(section.id)" in content
+    assert content.count("mergeLockedSections(") >= 3

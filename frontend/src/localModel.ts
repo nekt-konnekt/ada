@@ -1,6 +1,7 @@
 import { pipeline } from '@huggingface/transformers'
+import { documentTitleForProfession, type TemplateShape } from './workspaceLogic'
 
-type Profession = 'doctor' | 'lawyer'
+type Profession = string
 type Section = { id: string; label: string; content: string }
 type NeedInput = { id: string; question: string; section_id: string }
 type Warning = { section_id: string | null; message: string; token: string }
@@ -30,6 +31,15 @@ const doctorSections = [
   ['follow_up','Follow-up'],
 ] as const
 
+const genericSections = [
+  ['summary','Summary'],
+  ['key_points','Key Points'],
+  ['details','Details'],
+  ['decisions','Decisions'],
+  ['actions','Actions / Next Steps'],
+  ['open_questions','Open Questions'],
+] as const
+
 const lawyerSections = [
   ['parties','Parties'],
   ['facts','Facts / Incident Summary'],
@@ -40,9 +50,22 @@ const lawyerSections = [
   ['next_steps','Next Steps'],
 ] as const
 
-function blank(profession: Profession): LocalModelDocument {
-  const sections = profession === 'doctor' ? doctorSections : lawyerSections
-  return { title: profession === 'doctor' ? 'Clinical Note' : 'Case Note', sections: sections.map(([id,label]) => ({id,label,content:''})), needs_input:[], warnings:[], unplaced:[], provider:'local-model', provider_name:'Qwen3 · on-device' }
+function isSectionTuple(section: TemplateShape['sections'][number] | readonly [string, string]): section is readonly [string, string] {
+  return Array.isArray(section)
+}
+
+function normalizeSchema(sections: ReadonlyArray<TemplateShape['sections'][number] | readonly [string, string]>): Section[] {
+  return sections.map(section => isSectionTuple(section)
+    ? { id: section[0], label: section[1], content: '' }
+    : { id: section.id, label: section.label, content: '' })
+}
+
+function blank(profession: Profession, template?: TemplateShape | null): LocalModelDocument {
+  const sections = template?.sections || (profession === 'doctor' ? doctorSections
+    : profession === 'lawyer' ? lawyerSections
+    : genericSections)
+  const normalizedSections = normalizeSchema(sections)
+  return { title: template?.name || documentTitleForProfession(profession), sections: normalizedSections, needs_input:[], warnings:[], unplaced:[], provider:'local-model', provider_name:'Qwen3 · on-device' }
 }
 
 function extractJson(text: string): any | null {
@@ -55,10 +78,14 @@ function extractJson(text: string): any | null {
   try { return JSON.parse(candidate.slice(start, end + 1)) } catch { return null }
 }
 
-function promptFor(profession: Profession, notes: string): string {
-  const schema = profession === 'doctor' ? doctorSections : lawyerSections
-  const sectionText = schema.map(([id,label]) => `{"id":"${id}","label":"${label}","content":""}`).join(',')
-  return `You are Ada, a documentation structuring engine. Transform the user's raw notes into a professional draft. NEVER invent facts, diagnoses, measurements, dates, medications, names, or events. Preserve uncertain or missing information. Put each source fact in the best matching section. If a fact cannot be placed, put it in unplaced. Ask a concise question in needs_input only when a missing detail is necessary to complete a section. Return ONLY valid JSON. No markdown. Schema: {"title":"${profession === 'doctor' ? 'Clinical Note' : 'Case Note'}","sections":[${sectionText}],"needs_input":[],"warnings":[],"unplaced":[]}. User notes:\n${notes}`
+function promptFor(profession: Profession, notes: string, template?: TemplateShape | null): string {
+  const schema = template?.sections || (profession === 'doctor' ? doctorSections
+    : profession === 'lawyer' ? lawyerSections
+    : genericSections)
+  const sectionText = normalizeSchema(schema).map(section =>
+    `{"id":"${section.id}","label":"${section.label}","content":""}`
+  ).join(',')
+  return `You are Ada, a documentation structuring engine. Transform the user's raw notes into a professional draft. NEVER invent facts, diagnoses, measurements, dates, medications, names, or events. Preserve uncertain or missing information. Put each source fact in the best matching section. If a fact cannot be placed, put it in unplaced. Ask a concise question in needs_input only when a missing detail is necessary to complete a section. Return ONLY valid JSON. No markdown. Schema: {"title":"${template?.name || documentTitleForProfession(profession)}","sections":[${sectionText}],"needs_input":[],"warnings":[],"unplaced":[]}. User notes:\n${notes}`
 }
 
 async function getGenerator(onStatus?: (message: string) => void): Promise<any> {
@@ -77,19 +104,19 @@ async function getGenerator(onStatus?: (message: string) => void): Promise<any> 
   return generatorPromise
 }
 
-export async function localModelStructure(profession: Profession, notes: string, onStatus?: (message: string) => void): Promise<LocalModelDocument> {
+export async function localModelStructure(profession: Profession, notes: string, onStatus?: (message: string) => void, template?: TemplateShape | null): Promise<LocalModelDocument> {
   const generator = await getGenerator(onStatus)
   onStatus?.('Ada · local AI')
   const messages = [
     { role:'system', content:'You are a strict JSON documentation engine. Output JSON only. Never invent facts.' },
-    { role:'user', content: promptFor(profession, notes) },
+    { role:'user', content: promptFor(profession, notes, template) },
   ]
   const output = await generator(messages, { max_new_tokens: 900, do_sample: false })
   const generated = output?.[0]?.generated_text
   const text = Array.isArray(generated) ? generated[generated.length - 1]?.content || '' : String(generated || '')
   const parsed = extractJson(text)
   if (!parsed) throw new Error('Local model returned an unreadable draft')
-  const fallback = blank(profession)
+  const fallback = blank(profession, template)
   const allowed = new Set(fallback.sections.map(s => s.id))
   const sections = fallback.sections.map(section => {
     const found = Array.isArray(parsed.sections) ? parsed.sections.find((item:any) => String(item?.id) === section.id) : null

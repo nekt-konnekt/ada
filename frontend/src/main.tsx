@@ -6,7 +6,7 @@ import { Document, HeadingLevel, Packer, Paragraph, TextRun } from 'docx'
 import { jsPDF } from 'jspdf'
 import { PaddleOCR } from '@paddleocr/paddleocr-js'
 import { localModelStructure } from './localModel'
-import { accountCanGenerate, buildTemplateDraft, generationTriggerKey, isLatestSessionResponse, mergeLockedSections } from './workspaceLogic'
+import { accountCanGenerate, buildTemplateDraft, generationTriggerKey, getSafeStorage, isLatestSessionResponse, mergeLockedSections, safeStorageGet, safeStorageRemove, safeStorageSet } from './workspaceLogic'
 import './styles.css'
 
 let restoredDraftPending = false
@@ -60,10 +60,11 @@ const ONBOARDED_KEY = 'ada-onboarded';
 const USAGE_KEY = 'ada-usage-v1';
 const FREE_LIMIT = 10;
 type UsageKind = 'quick' | 'professional' | 'scan';
+function browserStorage() { return getSafeStorage(() => localStorage) }
 function usageMonth(): string { return new Date().toISOString().slice(0, 7) }
-function readUsage(): Record<UsageKind, number> { try { const raw = JSON.parse(localStorage.getItem(USAGE_KEY) || '{}'); if (raw.month !== usageMonth()) return { quick: 0, professional: 0, scan: 0 }; return { quick: Number(raw.quick) || 0, professional: Number(raw.professional) || 0, scan: Number(raw.scan) || 0 } } catch { return { quick: 0, professional: 0, scan: 0 } } }
-function saveUsage(usage: Record<UsageKind, number>) { localStorage.setItem(USAGE_KEY, JSON.stringify({ month: usageMonth(), ...usage })) }
-function isProfessionalPlan(): boolean { return localStorage.getItem('ada-plan') === 'professional' }
+function readUsage(): Record<UsageKind, number> { try { const raw = JSON.parse(safeStorageGet(browserStorage(), USAGE_KEY) || '{}'); if (raw.month !== usageMonth()) return { quick: 0, professional: 0, scan: 0 }; return { quick: Number(raw.quick) || 0, professional: Number(raw.professional) || 0, scan: Number(raw.scan) || 0 } } catch { return { quick: 0, professional: 0, scan: 0 } } }
+function saveUsage(usage: Record<UsageKind, number>) { safeStorageSet(browserStorage(), USAGE_KEY, JSON.stringify({ month: usageMonth(), ...usage })) }
+function isProfessionalPlan(): boolean { return safeStorageGet(browserStorage(), 'ada-plan') === 'professional' }
 function consumeFreeUse(kind: UsageKind): boolean { if (isProfessionalPlan()) return true; const usage = readUsage(); if (usage[kind] >= FREE_LIMIT) return false; usage[kind] += 1; saveUsage(usage); return true }
 
 function openNotesDb(): Promise<IDBDatabase> {
@@ -460,11 +461,11 @@ const useAda = create<Store>((set) => ({
 function goTo(path: string) { window.history.pushState({}, '', path); window.dispatchEvent(new PopStateEvent('popstate')) }
 
 function hasAdaPresence(): boolean {
-  return !!localStorage.getItem(PROFESSION_KEY);
+  return !!safeStorageGet(browserStorage(), PROFESSION_KEY);
 }
 
 function PublicPage() {
-  const start = () => { if (!localStorage.getItem(PROFESSION_KEY)) localStorage.setItem(PROFESSION_KEY, 'doctor'); localStorage.setItem(ONBOARDED_KEY, 'true'); goTo('/0.1') }
+  const start = () => { if (!safeStorageGet(browserStorage(), PROFESSION_KEY)) safeStorageSet(browserStorage(), PROFESSION_KEY, 'doctor'); safeStorageSet(browserStorage(), ONBOARDED_KEY, 'true'); goTo('/0.1') }
   return <main className="public-page ada-home">
     <header className="public-top"><button className="public-brand" onClick={()=>goTo('/')}><strong>Ada</strong></button><nav className="home-nav"><a href="#how-it-works">How it works</a><a href="#professionals">For professionals</a><a href="#pricing">Pricing</a><button onClick={start}>Open Ada </button></nav></header>
     <section className="home-hero"><div className="hero-copy"><span className="eyebrow">DOCUMENTATION WITHOUT THE INTERRUPTION</span><h1>Be present with your client. <em className="accent-heading">Let Ada handle the record.</em></h1><p>A professional documentation workspace for doctors. Scribble freely, speak naturally, upload rough documents, or scan handwritten notes in the left pane. Ada turns raw input into a structured clinical record in the right pane.</p><div className="hero-actions"><button className="home-primary" onClick={start}>Start documenting free <span></span></button><a href="#how-it-works">See how it works</a></div><div className="hero-proof"><span>✳ Free-form capture</span><span>◉ Local browser history</span><span>⌁ Editable output</span></div></div>
@@ -511,7 +512,7 @@ function App() {
   const [copyState, setCopyState] = useState('Copy to Clipboard')
   const [gateMessage, setGateMessage] = useState('')
   const [usage, setUsage] = useState<Record<UsageKind, number>>(readUsage())
-  const [privateMode, setPrivateMode] = useState(() => localStorage.getItem('ada-private-mode') === 'true')
+  const [privateMode, setPrivateMode] = useState(() => safeStorageGet(browserStorage(), 'ada-private-mode') === 'true')
   const [voiceState, setVoiceState] = useState<'idle' | 'listening'>('idle')
   const speechRecognition = useRef<SpeechRecognitionInstance | null>(null)
   const generationCharged = useRef(false)
@@ -526,14 +527,14 @@ function App() {
 
   useEffect(() => {
     const goOnline = () => { setIsOnline(true); setStatus('Online · ready') }
-    const goOffline = () => { setIsOnline(false); setPrivateMode(true); localStorage.setItem('ada-private-mode', 'true'); setStatus('Offline · private mode') }
+    const goOffline = () => { setIsOnline(false); setPrivateMode(true); safeStorageSet(browserStorage(), 'ada-private-mode', 'true'); setStatus('Offline · private mode') }
     window.addEventListener('online', goOnline)
     window.addEventListener('offline', goOffline)
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {})
     listLocalNotes().then(setHistory).catch(() => setStatus('Local history unavailable'))
-    const savedProfession = localStorage.getItem(PROFESSION_KEY) as Profession | null
+    const savedProfession = safeStorageGet(browserStorage(), PROFESSION_KEY) as Profession | null
     if (savedProfession) { setProfessionLocked(savedProfession); setProfession(savedProfession) }
-    if (localStorage.getItem(ONBOARDED_KEY) === 'true' && !loadPersona() && localStorage.getItem('ada-persona-skipped') !== '1') setOnboardingOpen(true)
+    if (safeStorageGet(browserStorage(), ONBOARDED_KEY) === 'true' && !loadPersona() && safeStorageGet(browserStorage(), 'ada-persona-skipped') !== '1') setOnboardingOpen(true)
     loadTemplates().then(tpls => {
       if (tpls.length) setTemplatesTickH(v => v + 1)
       const st = useAda.getState()
@@ -543,12 +544,12 @@ function App() {
       }
     })
     try {
-      const draft = localStorage.getItem('ada-current-draft')
+      const draft = safeStorageGet(browserStorage(), 'ada-current-draft')
       if (draft) {
         const parsed = JSON.parse(draft) as { profession: Profession; document: DocumentState }
         if (parsed.document) {
           useAda.setState({ profession: parsed.profession, notes: '', document: normalizeDocument(parsed.document), lockedSections: new Set<string>() })
-          localStorage.setItem('ada-current-draft', JSON.stringify({ profession: parsed.profession, document: normalizeDocument(parsed.document) }))
+          safeStorageSet(browserStorage(), 'ada-current-draft', JSON.stringify({ profession: parsed.profession, document: normalizeDocument(parsed.document) }))
           restoredDraftPending = true
           setStatus('Structured document restored from this device')
         }
@@ -563,7 +564,7 @@ function App() {
   }, [])
 
   useEffect(() => {
-    try { localStorage.setItem('ada-current-draft', JSON.stringify({ profession, document })) } catch {}
+    safeStorageSet(browserStorage(), 'ada-current-draft', JSON.stringify({ profession, document }))
   }, [profession, notes, document])
 
   function resizeScribbleCanvas() {
@@ -653,7 +654,7 @@ function App() {
   function togglePrivateMode() {
     setPrivateMode(value => {
       const next = !value
-      localStorage.setItem('ada-private-mode', String(next))
+      safeStorageSet(browserStorage(), 'ada-private-mode', String(next))
       setStatus(next ? 'Private mode · on-device structuring' : 'Online AI mode')
       return next
     })
@@ -875,8 +876,8 @@ function App() {
       {onboardingOpen && (
         <Onboarding
           templates={TEMPLATES.map(t => ({ id: t.id, name: t.name, profession: t.profession, profession_label: t.profession_label }))}
-          onDone={(profile, prof) => { setPersona(profile); setOnboardingOpen(false); localStorage.removeItem('ada-persona-skipped'); setProfession(prof); setTemplatesTickH(v => v + 1) }}
-          onSkip={() => { setOnboardingOpen(false); localStorage.setItem('ada-persona-skipped', '1') }}
+          onDone={(profile, prof) => { setPersona(profile); setOnboardingOpen(false); safeStorageRemove(browserStorage(), 'ada-persona-skipped'); setProfession(prof); setTemplatesTickH(v => v + 1) }}
+          onSkip={() => { setOnboardingOpen(false); safeStorageSet(browserStorage(), 'ada-persona-skipped', '1') }}
         />
       )}
       {authOpen && (
@@ -924,7 +925,7 @@ function App() {
             setProfession(tpl.profession)
             useAda.setState({ profession: tpl.profession, document: emptyDoc(tpl.profession), lockedSections: new Set<string>() })
             useAda.setState(s2 => ({ document: { ...emptyDoc(tpl.profession), template_id: tpl.id, title: tpl.name } }))
-            localStorage.setItem(PROFESSION_KEY, tpl.profession)
+            safeStorageSet(browserStorage(), PROFESSION_KEY, tpl.profession)
             setStatus(tpl.name + ' ready')
           }}>
           {TEMPLATES.length

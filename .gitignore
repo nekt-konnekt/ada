@@ -12,4 +12,5 @@ backend/data/
 
 # local env
 .env
-.venv/frontend/tsconfig.tsbuildinfo
+.venv/
+*.tsbuildinfo

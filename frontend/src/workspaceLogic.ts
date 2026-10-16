@@ -14,6 +14,14 @@ export type DraftShape = {
 
 type StorageLike = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
 
+export function getSafeStorage(getStorage: () => StorageLike): StorageLike | null {
+  try { return getStorage() } catch { return null }
+}
+
+export function generationTriggerKey(notes: string, profession: string, workspaceMode: string, privateMode: boolean, isOnline: boolean): string {
+  return JSON.stringify([notes, profession, workspaceMode, privateMode, isOnline])
+}
+
 const SECTION_HINTS: Record<string, string[]> = {
   attendees: ['attend', 'present', 'joined', 'met with'],
   decisions: ['decid', 'agreed', 'approved', 'chose'],
@@ -78,14 +86,16 @@ export function documentTitleForProfession(profession: string): string {
   return profession === 'doctor' ? 'Clinical Note' : profession === 'lawyer' ? 'Case Note' : 'Professional Document'
 }
 
-export function safeStorageGet(storage: StorageLike, key: string): string | null {
-  try { return storage.getItem(key) } catch { return null }
+export function safeStorageGet(storage: StorageLike | null, key: string): string | null {
+  try { return storage?.getItem(key) ?? null } catch { return null }
 }
 
-export function safeStorageSet(storage: StorageLike, key: string, value: string): boolean {
+export function safeStorageSet(storage: StorageLike | null, key: string, value: string): boolean {
+  if (!storage) return false
   try { storage.setItem(key, value); return true } catch { return false }
 }
 
-export function safeStorageRemove(storage: StorageLike, key: string): boolean {
+export function safeStorageRemove(storage: StorageLike | null, key: string): boolean {
+  if (!storage) return false
   try { storage.removeItem(key); return true } catch { return false }
 }

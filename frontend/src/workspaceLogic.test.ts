@@ -5,6 +5,8 @@ import {
   accountCanGenerate,
   buildTemplateDraft,
   documentTitleForProfession,
+  generationTriggerKey,
+  getSafeStorage,
   isLatestSessionResponse,
   mergeLockedSections,
   safeStorageGet,
@@ -63,6 +65,36 @@ test('storage helpers fail closed without interrupting onboarding', () => {
   assert.equal(safeStorageGet(blocked, 'key'), null)
   assert.equal(safeStorageSet(blocked, 'key', 'value'), false)
   assert.equal(safeStorageRemove(blocked, 'key'), false)
+})
+
+test('storage acquisition fails closed when the localStorage getter throws', () => {
+  const browser = Object.defineProperty({}, 'localStorage', {
+    get() { throw new DOMException('blocked', 'SecurityError') },
+  }) as { localStorage: Storage }
+  const storage = getSafeStorage(() => browser.localStorage)
+  assert.equal(storage, null)
+  assert.equal(safeStorageGet(storage, 'key'), null)
+  assert.equal(safeStorageSet(storage, 'key', 'value'), false)
+  assert.equal(safeStorageRemove(storage, 'key'), false)
+})
+
+test('account refresh does not retrigger remote generation for unchanged notes', () => {
+  let remoteGenerations = 0
+  let accountRefreshes = 0
+  let previousTrigger = generationTriggerKey('', 'doctor', 'professional', false, true)
+  const render = (notes: string) => {
+    const trigger = generationTriggerKey(notes, 'doctor', 'professional', false, true)
+    if (trigger !== previousTrigger) {
+      previousTrigger = trigger
+      remoteGenerations += 1
+      accountRefreshes += 1
+    }
+  }
+
+  render('New encounter notes')
+  render('New encounter notes') // account state refreshed with a new object identity
+  assert.equal(remoteGenerations, 1)
+  assert.equal(accountRefreshes, 1)
 })
 
 test('onboarding completion requires a concrete profession', () => {

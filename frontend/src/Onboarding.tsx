@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { safeStorageGet, safeStorageRemove, safeStorageSet, validProfessionChoice } from './workspaceLogic'
+import { getSafeStorage, safeStorageGet, safeStorageRemove, safeStorageSet, validProfessionChoice } from './workspaceLogic'
 
 export type PersonaProfile = {
   name: string
@@ -14,15 +14,19 @@ export type PersonaProfile = {
 
 export const PERSONA_KEY = 'ada-persona'
 
+function browserStorage() {
+  return getSafeStorage(() => localStorage)
+}
+
 export function loadPersona(): PersonaProfile | null {
   try {
-    const raw = safeStorageGet(localStorage, PERSONA_KEY)
+    const raw = safeStorageGet(browserStorage(), PERSONA_KEY)
     return raw ? (JSON.parse(raw) as PersonaProfile) : null
   } catch { return null }
 }
 
 export function savePersona(profile: PersonaProfile) {
-  safeStorageSet(localStorage, PERSONA_KEY, JSON.stringify(profile))
+  safeStorageSet(browserStorage(), PERSONA_KEY, JSON.stringify(profile))
 }
 
 type TemplateLite = { id: string; name: string; profession: string; profession_label: string }
@@ -59,11 +63,11 @@ export default function Onboarding({ templates, onDone, onSkip }: {
   }), [name, professionChoice, customProfession, industry, specialty, useCases, docStyle, language, templates])
 
   useEffect(() => {
-    const saved = safeStorageGet(localStorage, PERSONA_KEY + '-draft')
+    const saved = safeStorageGet(browserStorage(), PERSONA_KEY + '-draft')
     if (saved) { try { const d = JSON.parse(saved); if (d && d.step) { setResumeHint(true) } } catch {} }
   }, [])
   useEffect(() => {
-    const savedDraft = safeStorageGet(localStorage, PERSONA_KEY + '-draft')
+    const savedDraft = safeStorageGet(browserStorage(), PERSONA_KEY + '-draft')
     const existing = loadPersona()
     const src = (savedDraft ? (() => { try { return JSON.parse(savedDraft) } catch { return null } })() : null) || existing
     if (!src) return
@@ -77,7 +81,7 @@ export default function Onboarding({ templates, onDone, onSkip }: {
     if (src.language) setLanguage(src.language)
   }, [])
   useEffect(() => {
-    safeStorageSet(localStorage, PERSONA_KEY + '-draft', JSON.stringify({ step, name, professionChoice, customProfession, industry, specialty, useCases, docStyle, language }))
+    safeStorageSet(browserStorage(), PERSONA_KEY + '-draft', JSON.stringify({ step, name, professionChoice, customProfession, industry, specialty, useCases, docStyle, language }))
   }, [step, name, professionChoice, customProfession, industry, specialty, useCases, docStyle, language])
 
   const professionOptions = useMemo(() => {
@@ -104,8 +108,8 @@ export default function Onboarding({ templates, onDone, onSkip }: {
   function finish() {
     if (!hasProfession) { setStep(1); return }
     savePersona(draft)
-    safeStorageRemove(localStorage, PERSONA_KEY + '-draft')
-    safeStorageSet(localStorage, 'ada-profession', draft.profession)
+    safeStorageRemove(browserStorage(), PERSONA_KEY + '-draft')
+    safeStorageSet(browserStorage(), 'ada-profession', draft.profession)
     onDone(draft, draft.profession)
   }
 

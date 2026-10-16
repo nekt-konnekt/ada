@@ -6,7 +6,7 @@ import { Document, HeadingLevel, Packer, Paragraph, TextRun } from 'docx'
 import { jsPDF } from 'jspdf'
 import { PaddleOCR } from '@paddleocr/paddleocr-js'
 import { localModelStructure } from './localModel'
-import { accountCanGenerate, buildTemplateDraft, isLatestSessionResponse, mergeLockedSections } from './workspaceLogic'
+import { accountCanGenerate, buildTemplateDraft, generationTriggerKey, isLatestSessionResponse, mergeLockedSections } from './workspaceLogic'
 import './styles.css'
 
 let restoredDraftPending = false
@@ -807,6 +807,8 @@ function App() {
     }
   }, [scribbleMode])
 
+  const generationTrigger = generationTriggerKey(notes, profession, workspaceMode, privateMode, isOnline)
+
   useEffect(() => {
     window.clearTimeout(timer.current)
     if (!notes.trim()) generationCharged.current = false
@@ -862,7 +864,7 @@ function App() {
       }
     }, 650)
     return () => window.clearTimeout(timer.current)
-  }, [notes, profession, workspaceMode, privateMode, isOnline, account])
+  }, [generationTrigger])
 
   function handlePointer(e: React.PointerEvent<HTMLDivElement>) {
     const parent = e.currentTarget.parentElement?.getBoundingClientRect(); if (!parent) return

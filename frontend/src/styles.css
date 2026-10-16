@@ -222,3 +222,34 @@ footer .usage-limits,footer .plan-limits,footer [class*="usage"],footer [class*=
 
 .offline-badge{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:700;padding:4px 8px;border:1px solid #7AA3FF;border-radius:999px}.offline-badge i{width:6px;height:6px;border-radius:50%;background:#7AA3FF}.status{white-space:nowrap}
 @media(max-width:800px){.status{font-size:11px;max-width:180px;overflow:hidden;text-overflow:ellipsis}.workspace-title{display:none}}
+
+/* Onboarding */
+.onboarding-backdrop { position: fixed; inset: 0; background: rgba(8,12,16,.42); backdrop-filter: blur(3px); display: flex; align-items: center; justify-content: center; z-index: 220; padding: 16px; }
+.onboarding-card { background: var(--surface, #fff); border-radius: 16px; max-width: 520px; width: 100%; box-shadow: 0 18px 60px rgba(0,0,0,.25); padding: 22px 24px; font-family: inherit; }
+.onboarding-steps { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
+.ob-step { border: none; background: transparent; color: #66707a; padding: 4px 8px; border-radius: 8px; cursor: pointer; font-size: 12px; }
+.ob-step.current { background: #0f6f5c; color: #fff; }
+.onboarding-body h2 { margin: 6px 0 8px; font-size: 19px; }
+.onboarding-body p { color: #444; font-size: 14px; margin: 6px 0; }
+.onboarding-body label { display: block; font-size: 13px; margin: 12px 0 4px; color: #333; }
+.onboarding-body input, .onboarding-body select { width: 100%; padding: 9px 10px; border-radius: 10px; border: 1px solid #ccd3d8; font-size: 14px; margin-top: 4px; }
+.onboarding-body textarea { width: 100%; padding: 9px 10px; border-radius: 10px; border: 1px solid #ccd3d8; font-size: 14px; margin-top: 4px; resize: vertical; }
+.ob-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; margin: 10px 0; }
+.ob-option { text-align: left; padding: 9px 11px; border-radius: 10px; border: 1px solid #ccd3d8; background: #fff; cursor: pointer; }
+.ob-option strong { display: block; font-size: 13px; }
+.ob-option span { font-size: 11.5px; color: #67717b; }
+.ob-option.selected { border-color: #0f6f5c; box-shadow: inset 0 0 0 1px #0f6f5c; background: #f0faf7; }
+.ob-optional { opacity: .85; }
+.ob-hint { font-size: 12.5px; color: #66707a; }
+.ob-preview { font-size: 13px; border-left: 3px solid #0f6f5c; padding-left: 10px; color: #24313a; }
+.ob-resume { font-size: 12.5px; color: #0f6f5c; }
+.onboarding-footer { display: flex; justify-content: space-between; align-items: center; margin-top: 16px; gap: 10px; }
+.ob-actions { display: flex; gap: 8px; }
+.ob-primary { background: #0f6f5c; color: #fff; border: none; padding: 10px 16px; border-radius: 10px; cursor: pointer; font-size: 14px; }
+.ob-primary:disabled { opacity: .45; cursor: default; }
+.ob-secondary { background: transparent; border: 1px solid #b9c2c9; color: #24313a; padding: 9px 14px; border-radius: 10px; cursor: pointer; font-size: 13px; }
+.workspace-owner { opacity:.75; font-weight: 400; }
+.picker-cluster .template-picker { padding: 5px 8px; border-radius: 8px; border: 1px solid #ccd3d8; background: #fff; font-size: 12.5px; max-width: 200px; }
+.prefs-btn { border: 1px solid #ccd3d8; background: #fff; border-radius: 8px; padding: 3px 9px; font-size: 11.5px; cursor: pointer; margin-left: 10px; }
+@media (prefers-reduced-motion: no-preference) { .onboarding-card { animation: ob-in .18s ease; } }
+@keyframes ob-in { from { transform: translateY(6px); opacity: 0; } to { transform: none; opacity: 1; } }

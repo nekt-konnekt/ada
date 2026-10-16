@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
+import Onboarding, { loadPersona, PERSONA_KEY, savePersona, type PersonaProfile } from './Onboarding'
 import { createRoot } from 'react-dom/client'
 import { create } from 'zustand'
 import { Document, HeadingLevel, Packer, Paragraph, TextRun } from 'docx'
@@ -7,12 +8,47 @@ import { PaddleOCR } from '@paddleocr/paddleocr-js'
 import { localModelStructure } from './localModel'
 import './styles.css'
 
-type Profession = 'doctor' | 'lawyer'
+let restoredDraftPending = false
+type Profession = string
+type TemplateInfo = { id: string; name: string; version: number; profession: string; profession_label: string; document_kind: string; custom: boolean; sections: { id: string; label: string; field_kind: string }[] }
+const TEMPLATES: TemplateInfo[] = []
+async function loadTemplates(): Promise<TemplateInfo[]> {
+  if (TEMPLATES.length) return TEMPLATES
+  try {
+    const r = await fetch('/api/templates')
+    if (r.ok) {
+      const body = await r.json()
+      TEMPLATES.length = 0
+      TEMPLATES.push(...(body.templates as TemplateInfo[]))
+    }
+  } catch {}
+  return TEMPLATES
+}
+function templateFor(profession: Profession): TemplateInfo | null {
+  return TEMPLATES.find(t => t.profession === (profession || '').toLowerCase()) || TEMPLATES.find(t => t.profession === 'generic') || null
+}
+
+// document shape for a profession — template registry first, legacy fallback
+const LEGACY_SECTIONS: Record<Profession, {id:string;label:string}[]> = {
+  doctor: [
+    {id:'chief_complaint',label:'Chief Complaint'},{id:'history',label:'History of Present Illness'},
+    {id:'history_social_family',label:'Past / Social / Family History'},{id:'allergies',label:'Allergies'},
+    {id:'observations',label:'Observations / Vitals'},{id:'examination',label:'Examination Findings'},
+    {id:'investigations',label:'Investigations'},{id:'assessment',label:'Assessment'},
+    {id:'plan',label:'Plan'},{id:'follow_up',label:'Follow-up'}
+  ],
+  lawyer: [
+    {id:'parties',label:'Parties'},{id:'facts',label:'Facts / Incident Summary'},
+    {id:'injuries',label:'Injuries / Damages'},{id:'liability',label:'Liability / Issues'},
+    {id:'authorities',label:'Authorities'},{id:'evidence',label:'Supporting Information'},{id:'next_steps',label:'Next Steps'}
+  ]
+}
+const TITLES: Record<Profession, string> = { doctor: 'Clinical Note', lawyer: 'Case Note' }
 type Section = { id: string; label: string; content: string }
 type NeedInput = { id: string; question: string; section_id: string }
 type Warning = { section_id: string | null; message: string; token: string }
 type WorkspaceMode = 'quick' | 'professional'
-type DocumentState = { title: string; sections: Section[]; needs_input: NeedInput[]; warnings: Warning[]; unplaced: string[]; provider: string; provider_name: string }
+type DocumentState = { template_id?: string; title: string; sections: Section[]; needs_input: NeedInput[]; warnings: Warning[]; unplaced: string[]; provider: string; provider_name: string }
 type SavedNote = { id: string; profession: Profession; document: DocumentState; createdAt: string; updatedAt: string }
 
 const DB_NAME = 'ada-local';
@@ -192,6 +228,7 @@ function localStructureDocument(profession: Profession, notes: string): Document
 
 function normalizeDocument(document: any): DocumentState {
   return {
+    template_id: typeof document?.template_id === 'string' ? document.template_id : undefined,
     title: String(document?.title || 'Professional Document'),
     sections: Array.isArray(document?.sections) ? document.sections.map((section: any) => ({ id: String(section?.id || ''), label: String(section?.label || ''), content: String(section?.content || '') })) : [],
     needs_input: Array.isArray(document?.needs_input) ? document.needs_input.map((item: any) => typeof item === 'string' ? { id: 'needs_input', question: item, section_id: '' } : { id: String(item?.id || 'needs_input'), question: String(item?.question || item?.text || ''), section_id: String(item?.section_id || '') }).filter((item: NeedInput) => item.question.trim()) : [],
@@ -379,22 +416,22 @@ type Store = {
   setFocused: (id: string | null) => void
 }
 
-const emptyDoc = (profession: Profession): DocumentState => profession === 'doctor'
-  ? { title: 'Clinical Note', sections: [
-      { id:'chief_complaint', label:'Chief Complaint', content:'' }, { id:'history', label:'History of Present Illness', content:'' },
-      { id:'history_social_family', label:'Past / Social / Family History', content:'' }, { id:'allergies', label:'Allergies', content:'' },
-      { id:'observations', label:'Observations / Vitals', content:'' }, { id:'examination', label:'Examination Findings', content:'' },
-      { id:'investigations', label:'Investigations', content:'' }, { id:'assessment', label:'Assessment', content:'' },
-      { id:'plan', label:'Plan', content:'' }, { id:'follow_up', label:'Follow-up', content:'' }
-    ], needs_input: [], warnings: [], unplaced: [], provider:'ready', provider_name:'local demo' }
-  : { title: 'Case Note', sections: [
-      { id:'parties', label:'Parties', content:'' }, { id:'facts', label:'Facts / Incident Summary', content:'' },
-      { id:'injuries', label:'Injuries / Damages', content:'' }, { id:'liability', label:'Liability / Issues', content:'' },
-      { id:'authorities', label:'Authorities', content:'' }, { id:'evidence', label:'Supporting Information', content:'' }, { id:'next_steps', label:'Next Steps', content:'' }
-    ], needs_input: [], warnings: [], unplaced: [], provider:'ready', provider_name:'local demo' }
+const emptyDoc = (profession: Profession): DocumentState => {
+  const tpl = templateFor(profession)
+  if (tpl) {
+    return { title: tpl.name, sections: tpl.sections.map(s => ({ id: s.id, label: s.label, content: '' })),
+      needs_input: [], warnings: [], unplaced: [], provider: 'ready', provider_name: 'local demo', template_id: tpl.id }
+  }
+  const GENERIC = [{id:'summary',label:'Summary'},{id:'key_points',label:'Key Points'},{id:'details',label:'Details'},
+    {id:'decisions',label:'Decisions'},{id:'actions',label:'Actions / Next Steps'},{id:'open_questions',label:'Open Questions'}]
+  const sections = LEGACY_SECTIONS[profession] || GENERIC
+  return { title: TITLES[profession] || 'Professional Document', sections: sections.map(s => ({ ...s, content: '' })),
+    needs_input: [], warnings: [], unplaced: [], provider: 'ready', provider_name: 'local demo' }
+}
 
 const useAda = create<Store>((set) => ({
   profession: 'doctor', notes: '', document: emptyDoc('doctor'), focusedSection: null, lockedSections: new Set<string>(),
+  professionalTemplates: [] as TemplateInfo[],
   setProfession: (profession) => set({ profession, document: emptyDoc(profession), lockedSections: new Set<string>() }),
   setNotes: (notes) => set({ notes }), setDocument: (document) => set({ document: normalizeDocument(document) }),
   editSection: (id, content) => set(s => { const locked = new Set(s.lockedSections); locked.add(id); return { lockedSections: locked, document: { ...s.document, sections: s.document.sections.map(x => x.id === id ? {...x, content} : x) } } }),
@@ -405,8 +442,7 @@ const useAda = create<Store>((set) => ({
 function goTo(path: string) { window.history.pushState({}, '', path); window.dispatchEvent(new PopStateEvent('popstate')) }
 
 function hasAdaPresence(): boolean {
-  const profession = localStorage.getItem(PROFESSION_KEY);
-  return profession === 'doctor' || profession === 'lawyer';
+  return !!localStorage.getItem(PROFESSION_KEY);
 }
 
 function PublicPage() {
@@ -431,6 +467,10 @@ function App() {
   const [isOnline, setIsOnline] = useState(() => navigator.onLine)
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>('professional')
   const [professionLocked, setProfessionLocked] = useState<Profession>('doctor')
+  const setTemplatesTickH = useState(0)[1]
+  const prevNotes = useRef('')
+  const [persona, setPersona] = useState<PersonaProfile | null>(() => loadPersona())
+  const [onboardingOpen, setOnboardingOpen] = useState(false)
   const [split, setSplit] = useState(50)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [history, setHistory] = useState<SavedNote[]>([])
@@ -462,7 +502,16 @@ function App() {
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {})
     listLocalNotes().then(setHistory).catch(() => setStatus('Local history unavailable'))
     const savedProfession = localStorage.getItem(PROFESSION_KEY) as Profession | null
-    if (savedProfession === 'doctor' || savedProfession === 'lawyer') { setProfessionLocked(savedProfession); setProfession(savedProfession) }
+    if (savedProfession) { setProfessionLocked(savedProfession); setProfession(savedProfession) }
+    if (localStorage.getItem(ONBOARDED_KEY) === 'true' && !loadPersona() && localStorage.getItem('ada-persona-skipped') !== '1') setOnboardingOpen(true)
+    loadTemplates().then(tpls => {
+      if (tpls.length) setTemplatesTickH(v => v + 1)
+      const st = useAda.getState()
+      if (st.document.template_id == null && TEMPLATES.length) {
+        const tplLocal = TEMPLATES.find(t => t.profession === st.profession)
+        if (tplLocal) useAda.setState({ document: { ...emptyDoc(tplLocal.profession), template_id: tplLocal.id, title: tplLocal.name } })
+      }
+    })
     try {
       const draft = localStorage.getItem('ada-current-draft')
       if (draft) {
@@ -470,6 +519,7 @@ function App() {
         if (parsed.document) {
           useAda.setState({ profession: parsed.profession, notes: '', document: normalizeDocument(parsed.document), lockedSections: new Set<string>() })
           localStorage.setItem('ada-current-draft', JSON.stringify({ profession: parsed.profession, document: normalizeDocument(parsed.document) }))
+          restoredDraftPending = true
           setStatus('Structured document restored from this device')
         }
       }
@@ -693,16 +743,12 @@ function App() {
     setHistory(await listLocalNotes())
   }
 
-  useEffect(() => {
-    if (profession !== 'doctor') {
-      localStorage.setItem(PROFESSION_KEY, 'doctor')
-      setProfession('doctor')
-    }
-  }, [])
+  // universal: profession persisted from onboarding/template choice; no forced default
 
   function startNewEncounter() {
-    useAda.setState({ profession: 'doctor', notes: '', document: emptyDoc('doctor'), focusedSection: null, lockedSections: new Set<string>() })
-    setStatus('New clinical note')
+    const state = useAda.getState()
+    useAda.setState({ profession: state.profession, notes: '', document: emptyDoc(state.profession), focusedSection: null, lockedSections: new Set<string>() })
+    setStatus('New ' + (state.document.title || 'document'))
   }
 
   function markReviewComplete() {
@@ -732,8 +778,10 @@ function App() {
   useEffect(() => {
     window.clearTimeout(timer.current)
     if (!notes.trim()) generationCharged.current = false
+    const wasNonEmpty = prevNotes.current
+    prevNotes.current = notes
     if (!notes.trim() || workspaceMode === 'quick') {
-      if (!notes.trim() && workspaceMode === 'professional') { setDocument(emptyDoc(profession)); useAda.setState({ lockedSections: new Set<string>() }) }
+      if (!notes.trim() && workspaceMode === 'professional' && wasNonEmpty) { setDocument(emptyDoc(profession)); useAda.setState({ lockedSections: new Set<string>() }) }
       if (!notes.trim()) setStatus('Ready')
       return
     }
@@ -754,7 +802,7 @@ function App() {
           setStatus('Private · local AI')
           return
         }
-        const r = await fetch('/api/structure', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({profession, notes, current_document:document}), signal:request.current.signal })
+        const r = await fetch('/api/structure', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({profession, notes, template_id: document.template_id, current_document: document, locked_sections: [...lockedSections]}), signal:request.current.signal })
         if (!r.ok) {
           let detail = 'Request failed'
           try {
@@ -780,9 +828,32 @@ function App() {
   }
 
   return <main className="app">
+      {onboardingOpen && (
+        <Onboarding
+          templates={TEMPLATES.map(t => ({ id: t.id, name: t.name, profession: t.profession, profession_label: t.profession_label }))}
+          onDone={(profile, prof) => { setPersona(profile); setOnboardingOpen(false); localStorage.removeItem('ada-persona-skipped'); setProfession(prof); setTemplatesTickH(v => v + 1) }}
+          onSkip={() => { setOnboardingOpen(false); localStorage.setItem('ada-persona-skipped', '1') }}
+        />)}
     <header className="topbar">
       <div className="brand"><div><strong>Ada</strong><span>Clinical Documentation</span></div></div>
-      <div className="workspace-title">Clinical Documentation</div>
+      <div className="workspace-controls picker-cluster">
+        <select aria-label="Document type" className="template-picker"
+          value={document.template_id || (templateFor(profession)?.id ?? '')}
+          onChange={e => {
+            const tpl = TEMPLATES.find(t => t.id === e.target.value)
+            if (!tpl) return
+            setProfession(tpl.profession)
+            useAda.setState({ profession: tpl.profession, document: emptyDoc(tpl.profession), lockedSections: new Set<string>() })
+            useAda.setState(s2 => ({ document: { ...emptyDoc(tpl.profession), template_id: tpl.id, title: tpl.name } }))
+            localStorage.setItem(PROFESSION_KEY, tpl.profession)
+            setStatus(tpl.name + ' ready')
+          }}>
+          {TEMPLATES.length
+            ? TEMPLATES.map(t => <option key={t.id} value={t.id}>{t.profession_label} · {t.name}</option>)
+            : <option>{document.title || 'Clinical Note'}</option>}
+        </select>
+      </div>
+      <div className="workspace-title">{document.title || 'Documentation'}{persona?.name && persona.name !== 'there' ? <span className="workspace-owner"> · {persona.name}</span> : null}<button className="prefs-btn" onClick={() => setOnboardingOpen(true)} title="Edit preferences">Preferences</button></div>
       <div className="workspace-controls">
         <button type="button" className={privateMode ? 'private-toggle active' : 'private-toggle'} onClick={togglePrivateMode} title="Private mode keeps structuring on this device and does not call the AI API">◉ {privateMode ? 'Private' : 'Online AI'}</button>
         <span className="usage-pill">{isProfessionalPlan() ? 'Professional · unlimited' : 'Free · ' + usage.professional + '/10 docs'}</span>

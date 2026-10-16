@@ -1,6 +1,6 @@
 import { pipeline } from '@huggingface/transformers'
 
-type Profession = 'doctor' | 'lawyer'
+type Profession = string
 type Section = { id: string; label: string; content: string }
 type NeedInput = { id: string; question: string; section_id: string }
 type Warning = { section_id: string | null; message: string; token: string }
@@ -30,6 +30,15 @@ const doctorSections = [
   ['follow_up','Follow-up'],
 ] as const
 
+const genericSections = [
+  ['summary','Summary'],
+  ['key_points','Key Points'],
+  ['details','Details'],
+  ['decisions','Decisions'],
+  ['actions','Actions / Next Steps'],
+  ['open_questions','Open Questions'],
+] as const
+
 const lawyerSections = [
   ['parties','Parties'],
   ['facts','Facts / Incident Summary'],
@@ -41,8 +50,10 @@ const lawyerSections = [
 ] as const
 
 function blank(profession: Profession): LocalModelDocument {
-  const sections = profession === 'doctor' ? doctorSections : lawyerSections
-  return { title: profession === 'doctor' ? 'Clinical Note' : 'Case Note', sections: sections.map(([id,label]) => ({id,label,content:''})), needs_input:[], warnings:[], unplaced:[], provider:'local-model', provider_name:'Qwen3 · on-device' }
+  const sections = profession === 'doctor' ? doctorSections
+    : profession === 'lawyer' ? lawyerSections
+    : genericSections
+  return { title: profession === 'doctor' ? 'Clinical Note' : profession === 'lawyer' ? 'Case Note' : 'Professional Document', sections: sections.map(([id,label]) => ({id,label,content:''})), needs_input:[], warnings:[], unplaced:[], provider:'local-model', provider_name:'Qwen3 · on-device' }
 }
 
 function extractJson(text: string): any | null {
@@ -56,7 +67,9 @@ function extractJson(text: string): any | null {
 }
 
 function promptFor(profession: Profession, notes: string): string {
-  const schema = profession === 'doctor' ? doctorSections : lawyerSections
+  const schema = profession === 'doctor' ? doctorSections
+    : profession === 'lawyer' ? lawyerSections
+    : genericSections
   const sectionText = schema.map(([id,label]) => `{"id":"${id}","label":"${label}","content":""}`).join(',')
   return `You are Ada, a documentation structuring engine. Transform the user's raw notes into a professional draft. NEVER invent facts, diagnoses, measurements, dates, medications, names, or events. Preserve uncertain or missing information. Put each source fact in the best matching section. If a fact cannot be placed, put it in unplaced. Ask a concise question in needs_input only when a missing detail is necessary to complete a section. Return ONLY valid JSON. No markdown. Schema: {"title":"${profession === 'doctor' ? 'Clinical Note' : 'Case Note'}","sections":[${sectionText}],"needs_input":[],"warnings":[],"unplaced":[]}. User notes:\n${notes}`
 }

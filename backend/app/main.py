@@ -393,7 +393,8 @@ async def auth_logout(request: Request, response: Response):
 
 @app.get("/api/auth/me")
 async def auth_me(request: Request):
-    return current_user(request)
+    from fastapi.responses import JSONResponse
+    return JSONResponse(current_user(request), headers={'Cache-Control': 'no-store'})
 
 
 @app.post("/api/entitlements/upgrade-demo")

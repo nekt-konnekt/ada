@@ -482,6 +482,11 @@ function App() {
   const [professionLocked, setProfessionLocked] = useState<Profession>('doctor')
   const setTemplatesTickH = useState(0)[1]
   const prevNotes = useRef('')
+
+const applyAccount = (a: any) => {
+    if (!a || !('authenticated' in a)) return
+    setAccount((prev: any) => (a.authenticated || !prev?.authenticated) ? a : prev)
+  }
   const [account, setAccount] = useState<any>(null)
   const [authOpen, setAuthOpen] = useState(false)
   const [authMode, setAuthMode] = useState<'login' | 'signup'>('login')
@@ -543,7 +548,7 @@ function App() {
         }
       }
     } catch {}
-    fetch('/api/auth/me').then(r => r.ok ? r.json() : null).then(a => { if (a && 'authenticated' in a) setAccount(a) }).catch(() => {})
+    fetch('/api/auth/me?t=' + Date.now()).then(r => r.ok ? r.json() : null).then(a => applyAccount(a)).catch(() => {})
     return () => {
       window.removeEventListener('online', goOnline)
       window.removeEventListener('offline', goOffline)
@@ -835,7 +840,7 @@ function App() {
         const current = useAda.getState()
         const merged = { ...next, sections: next.sections.map(section => { const currentSection = current.document.sections.find(item => item.id === section.id); return current.lockedSections.has(section.id) && currentSection ? currentSection : section }) }
         setDocument(merged); setStatus(next.provider === 'local-demo' ? 'Local demo engine' : 'Live: ' + next.provider)
-        fetch('/api/auth/me').then(r => r.ok ? r.json() : null).then(a => { if (a && 'authenticated' in a) setAccount(a) }).catch(() => {})
+        fetch('/api/auth/me?t=' + Date.now()).then(r => r.ok ? r.json() : null).then(a => applyAccount(a)).catch(() => {})
       } catch (e) {
         if ((e as Error).name !== 'AbortError') setStatus('Could not update: ' + (e as Error).message)
       }

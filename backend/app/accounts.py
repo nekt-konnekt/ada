@@ -179,8 +179,25 @@ def usage_snapshot(user_id: str, plan: str) -> dict:
     }
 
 
+def check_generation_available(user_id: str, plan: str) -> None:
+    """Fail before provider work when a free account has exhausted its cap."""
+    if plan == "pro":
+        return
+    period = _period_key()
+    with _db() as db:
+        row = db.execute(
+            "SELECT used FROM usage_ledger WHERE user_id = ? AND period = ?", (user_id, period)
+        ).fetchone()
+    used = row["used"] if row else 0
+    if used >= FREE_MONTHLY_LIMIT:
+        raise AccountError(
+            429,
+            f"Free plan monthly limit ({FREE_MONTHLY_LIMIT} generations) reached. Upgrade to Pro for unlimited generations.",
+        )
+
+
 def record_generation(user_id: str, plan: str) -> None:
-    """Charge one generation; free plans over cap fail closed with 429."""
+    """Commit one successful online generation to the account ledger."""
     period = _period_key()
     with _WRITE_LOCK, _db() as db:
         if plan != "pro":

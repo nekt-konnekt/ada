@@ -146,10 +146,13 @@ VALIDATORS = {
 
 # ---- entry point ----
 
-def structure_from_context(context: WorkspaceContext) -> StructureResponse:
+def structure_from_context(
+    context: WorkspaceContext, template_owner_id: str | None = None
+) -> StructureResponse:
     template = template_for_profile_or_profession(
         (context.profile.profession if context.profile else None),
         context.template_id,
+        owner_id=template_owner_id,
     )
     notes = context.notes
     locked_ids = set(context.locked_sections or [])

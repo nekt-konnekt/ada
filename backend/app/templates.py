@@ -217,6 +217,8 @@ REGISTRY: dict[str, TemplateSpec] = {
         _generic_freeform(),
     ]
 }
+CUSTOM_REGISTRIES: dict[str, dict[str, TemplateSpec]] = {}
+MAX_CUSTOM_TEMPLATES_PER_OWNER = 20
 
 LEGACY_PROFESSION_TO_TEMPLATE = {
     "doctor": "doctor_clinical_note",
@@ -233,11 +235,15 @@ DEFAULT_TEMPLATE_BY_PROFESSION: dict[str, str] = {
 }
 
 
-def get_template(template_id: str) -> TemplateSpec:
+def get_template(template_id: str, owner_id: str | None = None) -> TemplateSpec:
+    if owner_id and template_id in CUSTOM_REGISTRIES.get(owner_id, {}):
+        return CUSTOM_REGISTRIES[owner_id][template_id]
     return REGISTRY[template_id]
 
 
-def template_for_profile_or_profession(profession: str | None, template_id: str | None) -> TemplateSpec:
+def template_for_profile_or_profession(
+    profession: str | None, template_id: str | None, owner_id: str | None = None
+) -> TemplateSpec:
     """Resolve the active template: explicit template_id wins; legacy profession
     tokens are accepted in either argument; then profession default; then generic.
     Never raises for unknown values."""
@@ -245,6 +251,8 @@ def template_for_profile_or_profession(profession: str | None, template_id: str 
         token = (token or "").lower()
         if not token:
             continue
+        if owner_id and token in CUSTOM_REGISTRIES.get(owner_id, {}):
+            return CUSTOM_REGISTRIES[owner_id][token]
         if token in REGISTRY:
             return REGISTRY[token]
         legacy = LEGACY_PROFESSION_TO_TEMPLATE.get(token)
@@ -256,7 +264,10 @@ def template_for_profile_or_profession(profession: str | None, template_id: str 
     return REGISTRY["generic_freeform"]
 
 
-def list_templates() -> list[dict]:
+def list_templates(owner_id: str | None = None) -> list[dict]:
+    visible = list(REGISTRY.values())
+    if owner_id:
+        visible.extend(CUSTOM_REGISTRIES.get(owner_id, {}).values())
     return [
         {
             "id": spec.id,
@@ -269,12 +280,14 @@ def list_templates() -> list[dict]:
             "custom": spec.custom,
             "sections": [{"id": s.id, "label": s.label, "field_kind": s.field_kind} for s in spec.sections],
         }
-        for spec in REGISTRY.values()
+        for spec in visible
     ]
 
 
-def register_custom_template(payload: dict) -> TemplateSpec:
-    """Validate a user-authored template and register it (runtime registry)."""
+def register_custom_template(payload: dict, *, owner_id: str) -> TemplateSpec:
+    """Validate and register a bounded custom template visible only to its owner."""
+    if not owner_id:
+        raise ValueError("custom template owner is required")
     payload = dict(payload)
     payload["custom"] = True
     raw_id = str(payload.get("id") or "").strip().lower().replace("-", "_").replace(" ", "_")
@@ -286,5 +299,10 @@ def register_custom_template(payload: dict) -> TemplateSpec:
         raise ValueError("custom template requires an id or name (alphanumeric)")
     payload["id"] = "custom_" + raw_id
     spec = TemplateSpec.model_validate(payload)
-    REGISTRY[spec.id] = spec
+    owner_registry = CUSTOM_REGISTRIES.setdefault(owner_id, {})
+    if spec.id in owner_registry or spec.id in REGISTRY:
+        raise ValueError(f"template id '{spec.id}' already exists")
+    if len(owner_registry) >= MAX_CUSTOM_TEMPLATES_PER_OWNER:
+        raise ValueError(f"custom template limit ({MAX_CUSTOM_TEMPLATES_PER_OWNER}) reached")
+    owner_registry[spec.id] = spec
     return spec

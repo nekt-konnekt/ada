@@ -23,6 +23,7 @@ from app.fidelity import (
 from app.accounts import (
     AccountError,
     COOKIE_NAME,
+    check_generation_available,
     create_session,
     create_user,
     delete_session,
@@ -33,7 +34,7 @@ from app.accounts import (
     user_for_token,
     verify_login,
 )
-from app.personas import PersonaProfile, StructureResponse, WorkspaceContext
+from app.personas import PersonaProfile, StructureResponse, TemplateSpec, WorkspaceContext
 from app.structuring import structure_from_context
 from app.templates import list_templates, template_for_profile_or_profession
 
@@ -68,7 +69,8 @@ def clean(text: str) -> str:
 
 def local_structure(profession: Profession, notes: str, template_id: str | None = None,
                     profile: PersonaProfile | None = None, current_document: dict | None = None,
-                    locked_sections: list[str] | None = None):
+                    locked_sections: list[str] | None = None,
+                    template_owner_id: str | None = None):
     """Legacy entry point: now a thin wrapper over the shared template engine."""
     context = WorkspaceContext(
         profile=profile,
@@ -77,14 +79,14 @@ def local_structure(profession: Profession, notes: str, template_id: str | None 
         current_document=current_document or {},
         locked_sections=locked_sections or [],
     )
-    response = structure_from_context(context)
+    response = structure_from_context(context, template_owner_id=template_owner_id)
     response.provider = "local-demo"
     response.provider_name = "local demo"
     return response
 
 
 
-async def llm_structure(req: StructureRequest) -> StructureResponse | None:
+async def llm_structure(req: StructureRequest, template: TemplateSpec) -> StructureResponse | None:
     key = os.getenv("LLM_API_KEY", "").strip() or os.getenv("GEMINI_API_KEY", "").strip()
     provider = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
     configured_model = os.getenv("LLM_MODEL", "gemini-3.5-flash").strip()
@@ -93,7 +95,7 @@ async def llm_structure(req: StructureRequest) -> StructureResponse | None:
     if not key:
         return None
 
-    if req.profession == "doctor":
+    if template.id == "doctor_clinical_note":
         section_rules = """
 - chief_complaint: the patient's main reason for seeking care, including patient-reported symptoms or concerns.
 - history: chronology and context of the complaint, including what the patient reports.
@@ -118,7 +120,7 @@ async def llm_structure(req: StructureRequest) -> StructureResponse | None:
             "plan": "Plan",
             "follow_up": "Follow-up",
         }
-    else:
+    elif template.id == "lawyer_case_note":
         section_rules = """
 - parties: people or organizations involved, with their roles only when stated.
 - facts: factual events and chronology stated by the user. Keep allegations attributed and do not convert allegations into established facts.
@@ -136,6 +138,9 @@ async def llm_structure(req: StructureRequest) -> StructureResponse | None:
             "evidence": "Supporting Information",
             "next_steps": "Next Steps",
         }
+    else:
+        section_rules = template.instructions
+        labels = {section.id: section.label for section in template.sections}
 
     schema = list(labels.keys())
     prompt = f"""You are Ada, a real-time professional note-to-document engine for a {req.profession}.
@@ -174,7 +179,7 @@ Return JSON only. No markdown and no commentary.
 
 JSON shape:
 {{
-  "title": "Clinical Note" or "Case Note",
+  "title": {json.dumps(template.title)},
   "sections": [
     {{"id": "section_id", "label": "section label", "content": "structured content"}}
   ],
@@ -302,14 +307,16 @@ Raw notes:
                 normalized_needs.append({
                     "id": str(item.get("id") or "needs_input"),
                     "question": question,
-                    "section_id": str(item.get("section_id") or ("plan" if req.profession == "doctor" else "next_steps")),
+                    "section_id": str(item.get("section_id") or (template.needs_input_on[0] if template.needs_input_on else schema[-1])),
                 })
         elif str(item).strip():
-            normalized_needs.append({"id": "needs_input", "question": str(item).strip(), "section_id": "plan" if req.profession == "doctor" else "next_steps"})
+            normalized_needs.append({"id": "needs_input", "question": str(item).strip(), "section_id": template.needs_input_on[0] if template.needs_input_on else schema[-1]})
 
     response = StructureResponse(
         profession=req.profession,
-        title=parsed.get("title") or ("Clinical Note" if req.profession == "doctor" else "Case Note"),
+        template_id=template.id,
+        template_version=template.version,
+        title=parsed.get("title") or template.title,
         sections=ordered,
         needs_input=normalized_needs,
         provider=used_model,
@@ -329,8 +336,9 @@ async def health():
 
 
 @app.get("/api/templates")
-async def templates():
-    return {"templates": list_templates()}
+async def templates(request: Request):
+    user = user_for_token(request.cookies.get(COOKIE_NAME))
+    return {"templates": list_templates(owner_id=user["id"] if user else None)}
 
 
 # ---------- accounts & entitlements ----------
@@ -405,7 +413,7 @@ async def upgrade_demo(request: Request):
     if not user:
         raise HTTPException(401, "Sign in first")
     set_plan(user["id"], "pro")
-    print(f"[accounts] plan upgraded to pro for {user['email']} (demo activation, no payment recorded)")
+    print(f"[accounts] plan upgraded to pro for {user['id']} (demo activation, no payment recorded)")
     return _user_dict(_user_by_id_safe(user["id"]))
 
 
@@ -419,21 +427,29 @@ async def structure(req: StructureRequest, request: Request):
     # Server-side usage accounting for signed-in users (free plan monthly cap).
     # Guests keep the frontend local counter — no account required.
     user = user_for_token(request.cookies.get(COOKIE_NAME))
-    if user:
+    llm_configured = bool(os.getenv("LLM_API_KEY", "").strip() or os.getenv("GEMINI_API_KEY", "").strip())
+    if user and llm_configured:
         try:
-            record_generation(user["id"], user["plan"])
+            check_generation_available(user["id"], user["plan"])
         except AccountError as exc:
-            raise HTTPException(exc.status, exc.detail)
+            raise HTTPException(exc.status, exc.detail) from exc
     profile = req.profile
-    template = template_for_profile_or_profession(req.profession, req.template_id)
+    owner_id = user["id"] if user else None
+    template = template_for_profile_or_profession(req.profession, req.template_id, owner_id=owner_id)
     # Legacy LLM prompt path keeps its verified specialty prompts; new templates
     # use their TemplateSpec instructions (see llm_structure).
     local = local_structure(
         req.profession, req.notes,
         template_id=template.id, profile=profile,
         current_document=req.current_document, locked_sections=req.locked_sections,
+        template_owner_id=owner_id,
     )
-    llm = await llm_structure(req)
+    llm = await llm_structure(req, template)
+    if llm is not None and user:
+        try:
+            record_generation(user["id"], user["plan"])
+        except AccountError as exc:
+            raise HTTPException(exc.status, exc.detail) from exc
     chosen = llm if llm else local
     # locked + user-edited sections always survive, whichever provider answered
     if req.locked_sections and (req.current_document or {}).get("sections"):

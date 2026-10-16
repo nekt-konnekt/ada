@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { safeStorageGet, safeStorageRemove, safeStorageSet, validProfessionChoice } from './workspaceLogic'
 
 export type PersonaProfile = {
   name: string
@@ -15,13 +16,13 @@ export const PERSONA_KEY = 'ada-persona'
 
 export function loadPersona(): PersonaProfile | null {
   try {
-    const raw = localStorage.getItem(PERSONA_KEY)
+    const raw = safeStorageGet(localStorage, PERSONA_KEY)
     return raw ? (JSON.parse(raw) as PersonaProfile) : null
   } catch { return null }
 }
 
 export function savePersona(profile: PersonaProfile) {
-  localStorage.setItem(PERSONA_KEY, JSON.stringify(profile))
+  safeStorageSet(localStorage, PERSONA_KEY, JSON.stringify(profile))
 }
 
 type TemplateLite = { id: string; name: string; profession: string; profession_label: string }
@@ -39,6 +40,7 @@ export default function Onboarding({ templates, onDone, onSkip }: {
   const [professionChoice, setProfessionChoice] = useState('')
   const [customProfession, setCustomProfession] = useState('')
   const [industry, setIndustry] = useState('')
+  const [specialty, setSpecialty] = useState('')
   const [useCases, setUseCases] = useState('')
   const [docStyle, setDocStyle] = useState('')
   const [language, setLanguage] = useState('English')
@@ -50,18 +52,18 @@ export default function Onboarding({ templates, onDone, onSkip }: {
       ? (customProfession.trim() || 'Custom role')
       : (templates.find(t => t.profession === professionChoice)?.profession_label || professionChoice),
     industry: industry.trim(),
-    specialty: '',
+    specialty: specialty.trim(),
     use_cases: useCases.trim(),
     doc_style: docStyle,
     language,
-  }), [name, professionChoice, customProfession, industry, useCases, docStyle, language, templates])
+  }), [name, professionChoice, customProfession, industry, specialty, useCases, docStyle, language, templates])
 
   useEffect(() => {
-    const saved = localStorage.getItem(PERSONA_KEY + '-draft')
+    const saved = safeStorageGet(localStorage, PERSONA_KEY + '-draft')
     if (saved) { try { const d = JSON.parse(saved); if (d && d.step) { setResumeHint(true) } } catch {} }
   }, [])
   useEffect(() => {
-    const savedDraft = localStorage.getItem(PERSONA_KEY + '-draft')
+    const savedDraft = safeStorageGet(localStorage, PERSONA_KEY + '-draft')
     const existing = loadPersona()
     const src = (savedDraft ? (() => { try { return JSON.parse(savedDraft) } catch { return null } })() : null) || existing
     if (!src) return
@@ -69,13 +71,14 @@ export default function Onboarding({ templates, onDone, onSkip }: {
     if (src.professionChoice) { setProfessionChoice(src.professionChoice); setCustomProfession(src.customProfession || '') }
     else if (existing && src === existing && existing.profession) { setProfessionChoice(existing.profession) }
     if (src.industry) setIndustry(src.industry)
+    if (src.specialty) setSpecialty(src.specialty)
     if (src.use_cases) setUseCases(src.use_cases)
     if (src.doc_style) setDocStyle(src.doc_style)
     if (src.language) setLanguage(src.language)
   }, [])
   useEffect(() => {
-    localStorage.setItem(PERSONA_KEY + '-draft', JSON.stringify({ step, name, professionChoice, customProfession, industry, useCases, docStyle, language }))
-  }, [step, name, professionChoice, customProfession, industry, useCases, docStyle, language])
+    safeStorageSet(localStorage, PERSONA_KEY + '-draft', JSON.stringify({ step, name, professionChoice, customProfession, industry, specialty, useCases, docStyle, language }))
+  }, [step, name, professionChoice, customProfession, industry, specialty, useCases, docStyle, language])
 
   const professionOptions = useMemo(() => {
     const seen = new Set<string>()
@@ -93,14 +96,16 @@ export default function Onboarding({ templates, onDone, onSkip }: {
     ? `Template ready: ${templatePreview.name}`
     : `Ada will structure your work as a ${draft.profession_label || 'professional'}: a Summary and Key Points, keeping decisions and next steps clearly outlined. You can refine this from the document-type picker.`
 
+  const hasProfession = validProfessionChoice(professionChoice, customProfession)
   const canNext = step === 1
-    ? (professionChoice === '__custom__' ? customProfession.trim().length > 1 : professionChoice.length > 0)
+    ? hasProfession
     : true
 
   function finish() {
+    if (!hasProfession) { setStep(1); return }
     savePersona(draft)
-    localStorage.removeItem(PERSONA_KEY + '-draft')
-    localStorage.setItem('ada-profession', draft.profession)
+    safeStorageRemove(localStorage, PERSONA_KEY + '-draft')
+    safeStorageSet(localStorage, 'ada-profession', draft.profession)
     onDone(draft, draft.profession)
   }
 
@@ -151,7 +156,7 @@ export default function Onboarding({ templates, onDone, onSkip }: {
                 <input autoFocus value={industry} onChange={e => setIndustry(e.target.value)} placeholder="Healthcare, Legal, Education, Construction, …" />
               </label>
               <label className="ob-optional">Anything about your specialty (optional)
-                <input value={useCases} onChange={e => setUseCases(e.target.value)} placeholder="Cardiology, M&A, Yoruba-medium primary school…" />
+                <input value={specialty} onChange={e => setSpecialty(e.target.value)} placeholder="Cardiology, M&A, Yoruba-medium primary school…" />
               </label>
             </>
           )}
@@ -193,7 +198,7 @@ export default function Onboarding({ templates, onDone, onSkip }: {
             {step > 0 && <button className="ob-secondary" onClick={() => setStep(s => s - 1)}>Back</button>}
             {step < 5
               ? <button className="ob-primary" disabled={!canNext} onClick={() => setStep(s => s + 1)}>Next</button>
-              : <button className="ob-primary" onClick={finish}>Start using Ada</button>}
+              : <button className="ob-primary" disabled={!hasProfession} onClick={finish}>Start using Ada</button>}
           </div>
         </div>
       </div>

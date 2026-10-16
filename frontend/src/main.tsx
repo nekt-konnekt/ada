@@ -6,6 +6,7 @@ import { Document, HeadingLevel, Packer, Paragraph, TextRun } from 'docx'
 import { jsPDF } from 'jspdf'
 import { PaddleOCR } from '@paddleocr/paddleocr-js'
 import { localModelStructure } from './localModel'
+import { accountCanGenerate, buildTemplateDraft, isLatestSessionResponse, mergeLockedSections } from './workspaceLogic'
 import './styles.css'
 
 let restoredDraftPending = false
@@ -196,6 +197,10 @@ function toApiProfile(persona: PersonaProfile | null | undefined) {
 }
 
 function localStructureDocument(profession: Profession, notes: string): DocumentState {
+  const selectedTemplate = templateFor(profession)
+  if (profession !== 'doctor' && profession !== 'lawyer' && selectedTemplate) {
+    return normalizeDocument(buildTemplateDraft(selectedTemplate, notes))
+  }
   const sentences = notes.split(/(?<=[.!?])\s+|\n+/).map(s => s.trim()).filter(Boolean)
   const bucket = (keywords: string[]) => sentences.filter(s => keywords.some(k => s.toLowerCase().includes(k))).join(' ')
   if (profession === 'doctor') {
@@ -483,11 +488,12 @@ function App() {
   const setTemplatesTickH = useState(0)[1]
   const prevNotes = useRef('')
 
-const applyAccount = (a: any) => {
-    if (!a || !('authenticated' in a)) return
-    setAccount((prev: any) => (a.authenticated || !prev?.authenticated) ? a : prev)
-  }
   const [account, setAccount] = useState<any>(null)
+  const sessionOrder = useRef(0)
+  const applyAccount = (a: any, responseOrder: number) => {
+    if (!a || !('authenticated' in a)) return
+    if (isLatestSessionResponse(responseOrder, sessionOrder.current)) setAccount(a)
+  }
   const [authOpen, setAuthOpen] = useState(false)
   const [authMode, setAuthMode] = useState<'login' | 'signup'>('login')
   const [authError, setAuthError] = useState('')
@@ -548,7 +554,8 @@ const applyAccount = (a: any) => {
         }
       }
     } catch {}
-    fetch('/api/auth/me?t=' + Date.now()).then(r => r.ok ? r.json() : null).then(a => applyAccount(a)).catch(() => {})
+    const accountRequestOrder = ++sessionOrder.current
+    fetch('/api/auth/me?t=' + Date.now()).then(r => r.ok ? r.json() : null).then(a => applyAccount(a, accountRequestOrder)).catch(() => {})
     return () => {
       window.removeEventListener('online', goOnline)
       window.removeEventListener('offline', goOffline)
@@ -811,18 +818,26 @@ const applyAccount = (a: any) => {
       return
     }
     timer.current = window.setTimeout(async () => {
-      if (!generationCharged.current) { if (!requireFreeUse('professional', 'Professional Document')) return; generationCharged.current = true }
+      if (!generationCharged.current) {
+        if (account?.authenticated) {
+          if (!accountCanGenerate(account)) { setGateMessage('Your account has reached its monthly AI document limit. Upgrade to Pro for unlimited use.'); return }
+        } else if (!requireFreeUse('professional', 'Professional Document')) return
+        generationCharged.current = true
+      }
       request.current?.abort(); request.current = new AbortController()
       const currentLocal = useAda.getState()
-      const localDraft = localStructureDocument(profession, notes)
-      const mergedLocal = { ...localDraft, sections: localDraft.sections.map(section => { const currentSection = currentLocal.document.sections.find(item => item.id === section.id); return currentLocal.lockedSections.has(section.id) && currentSection ? currentSection : section }) }
+      const activeTemplate = (document.template_id ? TEMPLATES.find(t => t.id === document.template_id) : null) || templateFor(profession)
+      const localDraft = profession === 'doctor' || profession === 'lawyer'
+        ? localStructureDocument(profession, notes)
+        : normalizeDocument(buildTemplateDraft(activeTemplate || { id: 'generic_freeform', name: 'Professional Document', sections: emptyDoc(profession).sections }, notes))
+      const mergedLocal = mergeLockedSections(currentLocal.document, localDraft, currentLocal.lockedSections)
       setDocument(mergedLocal)
       setStatus(privateMode || !isOnline ? 'Private mode · local AI starting…' : 'Local draft · refining online…')
       try {
         if (privateMode || !isOnline) {
-          const localAi = await localModelStructure(profession, notes, message => setStatus(message))
+          const localAi = await localModelStructure(profession, notes, message => setStatus(message), activeTemplate)
           const latest = useAda.getState()
-          const mergedAi = { ...localAi, sections: localAi.sections.map(section => { const currentSection = latest.document.sections.find(item => item.id === section.id); return latest.lockedSections.has(section.id) && currentSection ? currentSection : section }) }
+          const mergedAi = mergeLockedSections(latest.document, normalizeDocument(localAi), latest.lockedSections)
           setDocument(mergedAi)
           setStatus('Private · local AI')
           return
@@ -838,15 +853,16 @@ const applyAccount = (a: any) => {
         }
         const next = normalizeDocument(await r.json())
         const current = useAda.getState()
-        const merged = { ...next, sections: next.sections.map(section => { const currentSection = current.document.sections.find(item => item.id === section.id); return current.lockedSections.has(section.id) && currentSection ? currentSection : section }) }
+        const merged = mergeLockedSections(current.document, next, current.lockedSections)
         setDocument(merged); setStatus(next.provider === 'local-demo' ? 'Local demo engine' : 'Live: ' + next.provider)
-        fetch('/api/auth/me?t=' + Date.now()).then(r => r.ok ? r.json() : null).then(a => applyAccount(a)).catch(() => {})
+        const accountRequestOrder = ++sessionOrder.current
+        fetch('/api/auth/me?t=' + Date.now()).then(r => r.ok ? r.json() : null).then(a => applyAccount(a, accountRequestOrder)).catch(() => {})
       } catch (e) {
         if ((e as Error).name !== 'AbortError') setStatus('Could not update: ' + (e as Error).message)
       }
     }, 650)
     return () => window.clearTimeout(timer.current)
-  }, [notes, profession, workspaceMode, privateMode, isOnline])
+  }, [notes, profession, workspaceMode, privateMode, isOnline, account])
 
   function handlePointer(e: React.PointerEvent<HTMLDivElement>) {
     const parent = e.currentTarget.parentElement?.getBoundingClientRect(); if (!parent) return
@@ -870,9 +886,10 @@ const applyAccount = (a: any) => {
             <form className="onboarding-body" onSubmit={async (e) => {
               e.preventDefault(); setAuthError('')
               try {
+                const accountRequestOrder = ++sessionOrder.current
                 const r = await fetch('/api/auth/' + authMode, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: authEmail, password: authPassword }) })
                 const body = r.ok ? await r.json() : null
-                if (r.ok && body) { setAccount(body); setAuthOpen(false); setAuthPassword('') }
+                if (r.ok && body) { applyAccount(body, accountRequestOrder); setAuthOpen(false); setAuthPassword('') }
                 else { const d = await r.json().catch(() => null); setAuthError(typeof d?.detail === 'string' ? d.detail : 'Could not sign in') }
               } catch { setAuthError('Network error — try again') }
             }}>
@@ -913,7 +930,7 @@ const applyAccount = (a: any) => {
             : <option>{document.title || 'Clinical Note'}</option>}
         </select>
       </div>
-      <div className="workspace-title">{document.title || 'Documentation'}{persona?.name && persona.name !== 'there' ? <span className="workspace-owner"> · {persona.name}</span> : null}<button className="prefs-btn" onClick={() => setOnboardingOpen(true)} title="Edit preferences">Preferences</button>{account?.authenticated ? (<button className="auth-chip auth-in" onClick={async () => { try { await fetch('/api/auth/logout', { method: 'POST' }) } catch {} setAccount(null) }} title="Sign out">{account.email.split('@')[0]} · {account.plan === 'pro' ? 'Pro' : 'Free'} · Sign out</button>) : (<button className="auth-chip" onClick={() => { setAuthMode('login'); setAuthError(''); setAuthOpen(true) }}>Log in</button>)}</div>
+      <div className="workspace-title">{document.title || 'Documentation'}{persona?.name && persona.name !== 'there' ? <span className="workspace-owner"> · {persona.name}</span> : null}<button className="prefs-btn" onClick={() => setOnboardingOpen(true)} title="Edit preferences">Preferences</button>{account?.authenticated ? (<button className="auth-chip auth-in" onClick={async () => { ++sessionOrder.current; try { await fetch('/api/auth/logout', { method: 'POST' }) } catch {} setAccount({ authenticated: false }) }} title="Sign out">{account.email.split('@')[0]} · {account.plan === 'pro' ? 'Pro' : 'Free'} · Sign out</button>) : (<button className="auth-chip" onClick={() => { setAuthMode('login'); setAuthError(''); setAuthOpen(true) }}>Log in</button>)}</div>
       <div className="workspace-controls">
         <button type="button" className={privateMode ? 'private-toggle active' : 'private-toggle'} onClick={togglePrivateMode} title="Private mode keeps structuring on this device and does not call the AI API">◉ {privateMode ? 'Private' : 'Online AI'}</button>
         <span className="usage-pill">{account?.authenticated

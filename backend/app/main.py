@@ -6,7 +6,7 @@ from typing import Literal
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -20,11 +20,25 @@ from app.fidelity import (
     COMMON_DRUGS,
     _is_note_instruction,
 )
+from app.accounts import (
+    AccountError,
+    COOKIE_NAME,
+    create_session,
+    create_user,
+    delete_session,
+    init_db,
+    record_generation,
+    set_plan,
+    usage_snapshot,
+    user_for_token,
+    verify_login,
+)
 from app.personas import PersonaProfile, StructureResponse, WorkspaceContext
 from app.structuring import structure_from_context
 from app.templates import list_templates, template_for_profile_or_profession
 
 app = FastAPI(title="Ada 0.1 API", version="0.1.0")
+init_db()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -319,8 +333,96 @@ async def templates():
     return {"templates": list_templates()}
 
 
+# ---------- accounts & entitlements ----------
+
+class AuthRequest(BaseModel):
+    email: str
+    password: str
+
+
+def _set_session_cookie(response: Response, token: str):
+    import os as _os
+    response.set_cookie(
+        COOKIE_NAME, token,
+        max_age=30 * 24 * 3600, httponly=True, samesite="lax",
+        secure=_os.environ.get("ADA_COOKIE_SECURE", "0") == "1",
+    )
+
+
+def current_user(request: Request) -> dict:
+    return _user_dict(user_for_token(request.cookies.get(COOKIE_NAME)))
+
+
+def _user_dict(user) -> dict:
+    if not user:
+        return {"authenticated": False}
+    usage = usage_snapshot(user["id"], user["plan"])
+    return {"authenticated": True, "email": user["email"], "plan": user["plan"], "usage": usage}
+
+
+@app.post("/api/auth/signup")
+async def auth_signup(req: AuthRequest, response: Response):
+    try:
+        user = create_user(req.email, req.password)
+    except AccountError as exc:
+        raise HTTPException(exc.status, exc.detail)
+    token = create_session(user["id"])
+    _set_session_cookie(response, token)
+    return _user_dict(user)
+
+
+@app.post("/api/auth/login")
+async def auth_login(req: AuthRequest, response: Response):
+    try:
+        user = verify_login(req.email, req.password)
+    except AccountError as exc:
+        raise HTTPException(exc.status, exc.detail)
+    token = create_session(user["id"])
+    _set_session_cookie(response, token)
+    return _user_dict(user)
+
+
+@app.post("/api/auth/logout")
+async def auth_logout(request: Request, response: Response):
+    token = request.cookies.get(COOKIE_NAME)
+    if token:
+        delete_session(token)
+    response.delete_cookie(COOKIE_NAME)
+    return {"authenticated": False}
+
+
+@app.get("/api/auth/me")
+async def auth_me(request: Request):
+    return current_user(request)
+
+
+@app.post("/api/entitlements/upgrade-demo")
+async def upgrade_demo(request: Request):
+    """Explicitly a DEMO plan switch (real billing requires a payment provider).
+    Requires an authenticated session. Logged for auditability."""
+    user = user_for_token(request.cookies.get(COOKIE_NAME))
+    if not user:
+        raise HTTPException(401, "Sign in first")
+    set_plan(user["id"], "pro")
+    print(f"[accounts] plan upgraded to pro for {user['email']} (demo activation, no payment recorded)")
+    return _user_dict(_user_by_id_safe(user["id"]))
+
+
+def _user_by_id_safe(user_id: str):
+    from app.accounts import _user_by_id
+    return _user_by_id(user_id)
+
+
 @app.post("/api/structure", response_model=StructureResponse)
-async def structure(req: StructureRequest):
+async def structure(req: StructureRequest, request: Request):
+    # Server-side usage accounting for signed-in users (free plan monthly cap).
+    # Guests keep the frontend local counter — no account required.
+    user = user_for_token(request.cookies.get(COOKIE_NAME))
+    if user:
+        try:
+            record_generation(user["id"], user["plan"])
+        except AccountError as exc:
+            raise HTTPException(exc.status, exc.detail)
     profile = req.profile
     template = template_for_profile_or_profession(req.profession, req.template_id)
     # Legacy LLM prompt path keeps its verified specialty prompts; new templates

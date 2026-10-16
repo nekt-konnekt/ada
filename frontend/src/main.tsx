@@ -182,6 +182,19 @@ function getSpeechRecognition(): SpeechRecognitionConstructor | null {
   return (w.SpeechRecognition || w.webkitSpeechRecognition || null) as SpeechRecognitionConstructor | null
 }
 
+function toApiProfile(persona: PersonaProfile | null | undefined) {
+  if (!persona) return undefined
+  return {
+    profession: persona.profession,
+    profession_label: persona.profession_label,
+    industry: persona.industry,
+    specialty: persona.specialty,
+    use_cases: (persona.use_cases || '').split(/\n|,/).map(x => x.trim()).filter(Boolean),
+    language: persona.language || 'en',
+    notes_style: /concise/i.test(persona.doc_style || '') ? 'concise' : 'detailed',
+  }
+}
+
 function localStructureDocument(profession: Profession, notes: string): DocumentState {
   const sentences = notes.split(/(?<=[.!?])\s+|\n+/).map(s => s.trim()).filter(Boolean)
   const bucket = (keywords: string[]) => sentences.filter(s => keywords.some(k => s.toLowerCase().includes(k))).join(' ')
@@ -469,6 +482,12 @@ function App() {
   const [professionLocked, setProfessionLocked] = useState<Profession>('doctor')
   const setTemplatesTickH = useState(0)[1]
   const prevNotes = useRef('')
+  const [account, setAccount] = useState<any>(null)
+  const [authOpen, setAuthOpen] = useState(false)
+  const [authMode, setAuthMode] = useState<'login' | 'signup'>('login')
+  const [authError, setAuthError] = useState('')
+  const [authEmail, setAuthEmail] = useState('')
+  const [authPassword, setAuthPassword] = useState('')
   const [persona, setPersona] = useState<PersonaProfile | null>(() => loadPersona())
   const [onboardingOpen, setOnboardingOpen] = useState(false)
   const [split, setSplit] = useState(50)
@@ -524,6 +543,7 @@ function App() {
         }
       }
     } catch {}
+    fetch('/api/auth/me').then(r => r.ok ? r.json() : null).then(a => { if (a && 'authenticated' in a) setAccount(a) }).catch(() => {})
     return () => {
       window.removeEventListener('online', goOnline)
       window.removeEventListener('offline', goOffline)
@@ -802,7 +822,7 @@ function App() {
           setStatus('Private · local AI')
           return
         }
-        const r = await fetch('/api/structure', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({profession, notes, template_id: document.template_id, current_document: document, locked_sections: [...lockedSections]}), signal:request.current.signal })
+        const r = await fetch('/api/structure', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({profession, notes, template_id: document.template_id, current_document: document, locked_sections: [...lockedSections], profile: toApiProfile(persona)}), signal:request.current.signal })
         if (!r.ok) {
           let detail = 'Request failed'
           try {
@@ -815,6 +835,7 @@ function App() {
         const current = useAda.getState()
         const merged = { ...next, sections: next.sections.map(section => { const currentSection = current.document.sections.find(item => item.id === section.id); return current.lockedSections.has(section.id) && currentSection ? currentSection : section }) }
         setDocument(merged); setStatus(next.provider === 'local-demo' ? 'Local demo engine' : 'Live: ' + next.provider)
+        fetch('/api/auth/me').then(r => r.ok ? r.json() : null).then(a => { if (a && 'authenticated' in a) setAccount(a) }).catch(() => {})
       } catch (e) {
         if ((e as Error).name !== 'AbortError') setStatus('Could not update: ' + (e as Error).message)
       }
@@ -833,7 +854,41 @@ function App() {
           templates={TEMPLATES.map(t => ({ id: t.id, name: t.name, profession: t.profession, profession_label: t.profession_label }))}
           onDone={(profile, prof) => { setPersona(profile); setOnboardingOpen(false); localStorage.removeItem('ada-persona-skipped'); setProfession(prof); setTemplatesTickH(v => v + 1) }}
           onSkip={() => { setOnboardingOpen(false); localStorage.setItem('ada-persona-skipped', '1') }}
-        />)}
+        />
+      )}
+      {authOpen && (
+        <div className="auth-backdrop" role="dialog" aria-modal="true" aria-label="Account">
+          <div className="onboarding-card auth-card">
+            <div className="onboarding-steps"><span className="ob-step current">{authMode === 'login' ? 'Sign in' : 'Create account'}</span></div>
+            <h2 className="onboarding-title">{authMode === 'login' ? 'Welcome back' : 'Create your Ada account'}</h2>
+            <p className="onboarding-sub">{authMode === 'login' ? 'Sign in for monthly usage tracking and Pro entitlements.' : 'Accounts add monthly usage tracking. Free plan: 10 generations per month; Pro: unlimited.'}</p>
+            <form className="onboarding-body" onSubmit={async (e) => {
+              e.preventDefault(); setAuthError('')
+              try {
+                const r = await fetch('/api/auth/' + authMode, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: authEmail, password: authPassword }) })
+                const body = r.ok ? await r.json() : null
+                if (r.ok && body) { setAccount(body); setAuthOpen(false); setAuthPassword('') }
+                else { const d = await r.json().catch(() => null); setAuthError(typeof d?.detail === 'string' ? d.detail : 'Could not sign in') }
+              } catch { setAuthError('Network error — try again') }
+            }}>
+              <label className="ob-label" htmlFor="auth-email">Email</label>
+              <input id="auth-email" type="email" required value={authEmail} onChange={e => setAuthEmail(e.target.value)} placeholder="you@example.com" className="ob-input" />
+              <label className="ob-label" htmlFor="auth-password">Password</label>
+              <input id="auth-password" type="password" required value={authPassword} onChange={e => setAuthPassword(e.target.value)} placeholder="At least 8 characters" className="ob-input" />
+              {authError ? <p className="ob-hint" role="alert">{authError}</p> : null}
+              <div className="onboarding-actions">
+                <button type="button" className="ob-secondary" onClick={() => { setAuthOpen(false); setAuthPassword('') }}>Not now</button>
+                <button type="submit" className="ob-primary">{authMode === 'login' ? 'Sign in' : 'Create account'}</button>
+              </div>
+              <p className="ob-hint">
+                {authMode === 'login'
+                  ? <>New here? <button type="button" className="ob-link" onClick={() => { setAuthMode('signup'); setAuthError('') }}>Create an account</button></>
+                  : <>Already have an account? <button type="button" className="ob-link" onClick={() => { setAuthMode('login'); setAuthError('') }}>Sign in</button></>}
+              </p>
+            </form>
+          </div>
+        </div>
+      )}
     <header className="topbar">
       <div className="brand"><div><strong>Ada</strong><span>Clinical Documentation</span></div></div>
       <div className="workspace-controls picker-cluster">
@@ -853,10 +908,12 @@ function App() {
             : <option>{document.title || 'Clinical Note'}</option>}
         </select>
       </div>
-      <div className="workspace-title">{document.title || 'Documentation'}{persona?.name && persona.name !== 'there' ? <span className="workspace-owner"> · {persona.name}</span> : null}<button className="prefs-btn" onClick={() => setOnboardingOpen(true)} title="Edit preferences">Preferences</button></div>
+      <div className="workspace-title">{document.title || 'Documentation'}{persona?.name && persona.name !== 'there' ? <span className="workspace-owner"> · {persona.name}</span> : null}<button className="prefs-btn" onClick={() => setOnboardingOpen(true)} title="Edit preferences">Preferences</button>{account?.authenticated ? (<button className="auth-chip auth-in" onClick={async () => { try { await fetch('/api/auth/logout', { method: 'POST' }) } catch {} setAccount(null) }} title="Sign out">{account.email.split('@')[0]} · {account.plan === 'pro' ? 'Pro' : 'Free'} · Sign out</button>) : (<button className="auth-chip" onClick={() => { setAuthMode('login'); setAuthError(''); setAuthOpen(true) }}>Log in</button>)}</div>
       <div className="workspace-controls">
         <button type="button" className={privateMode ? 'private-toggle active' : 'private-toggle'} onClick={togglePrivateMode} title="Private mode keeps structuring on this device and does not call the AI API">◉ {privateMode ? 'Private' : 'Online AI'}</button>
-        <span className="usage-pill">{isProfessionalPlan() ? 'Professional · unlimited' : 'Free · ' + usage.professional + '/10 docs'}</span>
+        <span className="usage-pill">{account?.authenticated
+          ? (account.usage?.limit == null ? 'Pro · unlimited' : 'Free · ' + account.usage.used + '/' + account.usage.limit + ' AI docs')
+          : (isProfessionalPlan() ? 'Professional · unlimited' : 'Free · ' + usage.professional + '/10 docs')}</span>
       </div>
       <div className="status"><i></i>{isOnline ? status : "Offline · Private mode"}</div>
     </header>

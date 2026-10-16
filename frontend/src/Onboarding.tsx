@@ -61,6 +61,19 @@ export default function Onboarding({ templates, onDone, onSkip }: {
     if (saved) { try { const d = JSON.parse(saved); if (d && d.step) { setResumeHint(true) } } catch {} }
   }, [])
   useEffect(() => {
+    const savedDraft = localStorage.getItem(PERSONA_KEY + '-draft')
+    const existing = loadPersona()
+    const src = (savedDraft ? (() => { try { return JSON.parse(savedDraft) } catch { return null } })() : null) || existing
+    if (!src) return
+    if (src.name && src.name !== 'there') setName(src.name)
+    if (src.professionChoice) { setProfessionChoice(src.professionChoice); setCustomProfession(src.customProfession || '') }
+    else if (existing && src === existing && existing.profession) { setProfessionChoice(existing.profession) }
+    if (src.industry) setIndustry(src.industry)
+    if (src.use_cases) setUseCases(src.use_cases)
+    if (src.doc_style) setDocStyle(src.doc_style)
+    if (src.language) setLanguage(src.language)
+  }, [])
+  useEffect(() => {
     localStorage.setItem(PERSONA_KEY + '-draft', JSON.stringify({ step, name, professionChoice, customProfession, industry, useCases, docStyle, language }))
   }, [step, name, professionChoice, customProfession, industry, useCases, docStyle, language])
 

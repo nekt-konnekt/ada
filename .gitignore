@@ -1,0 +1,15 @@
+# dependencies / build artifacts
+node_modules/
+frontend/dist/
+__pycache__/
+*.pyc
+
+# runtime state
+backend/data/
+*.db
+*.db-wal
+*.db-shm
+
+# local env
+.env
+.venv/
